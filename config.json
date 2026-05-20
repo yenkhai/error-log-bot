@@ -1,0 +1,6 @@
+{
+    "LOGIN_URL": "http://10.16.250.9/ubah/index.php?",
+    "AUTH_USER": "bersih",
+    "AUTH_PASS": "bersih428",
+    "MAX_RECORD_LIMIT": 10000
+}

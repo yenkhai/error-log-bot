@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Virtual Environment
+venv/
+env/
+.env
+
+# Configuration (Optional: ignore config if it contains passwords)
+# config.json 
+
+# OS generated files
+.DS_Store
+Thumbs.db
