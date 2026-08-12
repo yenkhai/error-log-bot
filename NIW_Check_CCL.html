@@ -1,0 +1,345 @@
+<html><head>
+	<title>Check Semi Cash CCL</title>
+	<link href="css/om.css?v=2" rel="stylesheet" type="text/css">
+	<script type="text/javascript" src="../../javascript/jquery-1_10_2_min.js"></script>
+	<script type="text/javascript" src="../javascript/xhttprequest.js"></script>
+	<script type="text/javascript" src="javascript/function_check_ccl.js?v=1.2"></script>
+	<script type="text/javascript" src="javascript/function_credit_ccl.js?v=1.2"></script>
+	<script language="JavaScript" src="../javascript/general.js"></script>
+	<script language="JavaScript" src="../javascript/tableH.js"></script>
+	<script language="JavaScript" src="../javascript/drag-and-drop.js"></script>
+	<script language="JavaScript">
+		var global_refresh_timer = 180;
+		var global_refresh_timer_credit = 180;
+		var js_companycode_arr = {"RCM":{"s0001":3,"d0005":9,"d0008":13,"d0009":14,"d0011":16,"d0012":17,"d0013":18,"d0015":19,"d0032":36,"p0001":21,"p0002":22,"p0003":23,"p0005":25,"j0001":33,"f0001":1001,"j0002":1003,"p0008":1005,"s0010":3003,"k0002":3004,"tq001":4002},"LRCM":{"s0001":43,"s0002":88,"testapi2":96,"ag002":1001,"s0009":3001,"t0001":4000}};
+		var js_companycode_credit_arr = {"RCM":{"s0001":3,"d0005":9,"d0008":13,"d0009":14,"d0011":16,"d0012":17,"d0013":18,"d0015":19,"d0032":36,"s0010":3003,"k0002":3004},"LRCM":{"s0001":43,"s0002":88,"s0009":3001}};
+		var modi="&modu= 126&modi= 132";
+		var managerindex = '248';
+		var moduleindex = 132;
+		var acc_lvl = 'support';
+		var accuser = 'op';
+		var com_code=["RCM","LRCM"];
+		var com_index=[{"s0001":3,"d0005":9,"d0008":13,"d0009":14,"d0011":16,"d0012":17,"d0013":18,"d0015":19,"d0032":36,"p0001":21,"p0002":22,"p0003":23,"p0005":25,"e2001":30,"j0001":33,"e1001":34,"f0001":1001,"e1002":1006,"e2002":1002,"j0002":1003,"e2003":1004,"p0008":1005,"s0010":3003,"k0002":3004,"tq001":4002,"eq001":4003},{"s0001":43,"s0002":88,"testapi2":96,"ag002":1001,"s0009":3001,"t0001":4000}];
+		var companies = {"LRCM":{"43":{"id":43,"company_code":"Nv01 - s0001","market":"0","remark":"test company  1","status":"1","api_url":"http:\/\/10.16.251.49\/s0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"88":{"id":88,"company_code":"Nv01 - s0002","market":"0","remark":"NIW test company 2","status":"1","api_url":"http:\/\/10.16.251.49\/s0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"96":{"id":96,"company_code":"Nv01 - testapi2","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.251.49\/s0003_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2019-03-01","products":[3]},"1001":{"id":1001,"company_code":"Nv02 - ag002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.251.49\/x0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"3001":{"id":3001,"company_code":"Nv05 - s0009","market":"0","remark":null,"status":"1","api_url":"http:\/\/10.16.251.49\/s0009_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-12-01","products":[3]},"4000":{"id":4000,"company_code":"Nv06 - t0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.101.10.49\/t0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]}},"RCM":{"3":{"id":3,"company_code":"Nv01 - s0001","market":"0","remark":"FBao","status":"1","api_url":"http:\/\/10.16.12.49\/s0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"9":{"id":9,"company_code":"Nv01 - d0005","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.12.49\/d0005_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"13":{"id":13,"company_code":"Nv01 - d0008","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0008_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"14":{"id":14,"company_code":"Nv01 - d0009","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.12.49\/d0009_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"15":{"id":15,"company_code":"Nv01 - d0010","market":"0","remark":"","status":"1","api_url":"null","action_status":"0","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"16":{"id":16,"company_code":"Nv01 - d0011","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0011_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"17":{"id":17,"company_code":"Nv01 - d0012","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0012_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"18":{"id":18,"company_code":"Nv01 - d0013","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.12.49\/d0011_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"19":{"id":19,"company_code":"Nv01 - d0015","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0015_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"36":{"id":36,"company_code":"Nv01 - d0032","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0032_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"21":{"id":21,"company_code":"Nv01 - p0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.13.49\/p0001_robot\/public\/","action_status":"1","lock_cancel_wager":"1","lock_report_date":"2025-12-31","products":[3]},"22":{"id":22,"company_code":"Nv01 - p0002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.14.49\/p0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"23":{"id":23,"company_code":"Nv01 - p0003","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.15.49\/p0003_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"25":{"id":25,"company_code":"Nv01 - p0005","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.16.49\/p0005_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"30":{"id":30,"company_code":"Nv01 - e2001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.19.49\/e2001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":null,"products":[3]},"33":{"id":33,"company_code":"Nv01 - j0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.17.49\/j0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":null,"products":[3]},"34":{"id":34,"company_code":"Nv01 - e1001","market":"2","remark":"API One Wallet Credit","status":"1","api_url":"http:\/\/10.16.18.49\/e1001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":null,"products":[3]},"1001":{"id":1001,"company_code":"Nv02 - f0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.57.49\/f0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1002":{"id":1002,"company_code":"Nv02 - e2002","market":"2","remark":"API One Wallet - Fabbet","status":"1","api_url":"http:\/\/10.16.50.49\/e2002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1003":{"id":1003,"company_code":"Nv02 - j0002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.52.49\/j0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1004":{"id":1004,"company_code":"Nv02 - e2003","market":"2","remark":"API One Wallet","status":"1","api_url":"http:\/\/10.16.51.49\/e2003_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1005":{"id":1005,"company_code":"Nv02 - p0008","market":"2","remark":"API Transfer Wallet","status":"1","api_url":"http:\/\/10.16.53.49\/p0008_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1006":{"id":1006,"company_code":"Nv02 - e1002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.56.49\/e1002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"3003":{"id":3003,"company_code":"Nv05 - s0010","market":"0","remark":null,"status":"1","api_url":"http:\/\/10.16.90.49\/s0010_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2024-01-01","products":[3]},"3004":{"id":3004,"company_code":"Nv05 - k0002","market":"0","remark":null,"status":"1","api_url":"http:\/\/10.16.90.49\/k0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2024-01-01","products":[3]},"4002":{"id":4002,"company_code":"Nv06 - tq001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.101.10.59\/tq001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"4003":{"id":4003,"company_code":"Nv06 - eq001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.101.10.69\/eq001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]}}};
+		var products_name = {"3":"sport","4":"sporttery"};
+		thisTimer = 180;
+		thisTimer_credit = 180;
+		var lang = [];
+		lang['member']="Member";
+		lang['title_no']="NO";
+		lang['ACCOUNTCODE']="Account Code";
+		lang['ACCOUNTINDEX']="Account Index";
+		lang['ccl']="Current Credit Limit";
+		lang['cl']="Credit Limit";
+		lang['MEMBER_WIN_LOSS']="Member Win loss";
+		lang['MEMBER_WIN_LOSS1']="Member Win loss(Local)";
+		lang['LEDGER']="Ledger";
+		lang['AGENT_CODE']="Agent Code";
+		lang['active_bet']="Active Bet";
+		lang['active_betl']="Active Bet(Local)";
+		lang['CALCULATE_RESULT']="Calculation Result";
+		lang['different']="Different";
+		lang['agent']="Agent";
+		lang['norecord']="No Record";
+		lang['patch']="Patch";
+		lang['ccl_diff']="CCL Different";
+
+		window.onload=function(){//alert("222");
+			//var level=document.getElementById('pagelevel').value;
+			//var comcode=document.getElementById('companycode').value;
+			submit_action('select');
+			submit_action_credit('select');
+			//document.myForm.companycode.focus();
+		}
+
+		function trigger_submit_action(){
+			submit_action('select');
+			submit_action_credit('select');
+		}
+	</script>
+	<style>
+	.report thead{
+		position: sticky;
+		top: 0; /* Don't forget this, required for the stickiness */
+		border: 1px solid #000000;
+	}
+	</style>
+</head>
+<body style="">
+<script language="JavaScript">
+	var arr = [];
+	var managerindex = '248';
+	var moduleindex = '132';
+	var cp_filter = '["A0099","B0099","LRCM"]';
+	var duplicate_check=1;
+	function setCP(){
+		if(duplicate_check==1){
+			var cp = document.getElementById('checkpoint');
+			duplicate_check=0;
+			jQuery.ajax({
+				url: '../support/checkpoint-action.php',
+				type: "POST",
+				data: {func: "add_checkpoint", managerindex: managerindex, moduleindex: moduleindex},
+				success: function(data){
+					$("#checkpoint_status").text(data);
+					$('#checkpoint').attr("disabled", true);
+				}
+			});
+		}else{
+			alert('Please Wait action is complete')
+		}
+	}
+	
+	function companyAuto(option_value){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com'] option:selected").val();
+		var chk_tb = '';
+		//var t = $("a[id*='a_']").text();
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('A0099');
+							chk_filter.push('B0099');
+							chk_filter.push('LRCM');
+			
+
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) == '-1'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}	
+			}else{
+				cp_exist = true;
+				count--;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		/*if(cp_exist == true){
+			count = count-chk_filter.length;
+		}*/
+			
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function companySearch(){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com']").val();
+		var chk_tb ='';
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('A0099');
+								chk_filter.push('B0099');
+								chk_filter.push('LRCM');
+					
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) != '0'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}
+			}else{
+				cp_exist = true;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		if(cp_exist == true){
+			count = count-chk_filter.length;
+		}
+		
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function hideCheckbox(){
+		$('#checkpoint').disabled = true;
+		$('#div_checkpoint').hide();
+	}
+	
+	function showCheckbox(){
+		$('#checkpoint').disabled = false;
+		$('#div_checkpoint').show();
+	}
+
+	$(document).ready(function(){
+		$(":button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+		
+		$("#id_search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#div_checkpoint').show();
+		});
+		
+		$("#search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+	});
+	
+	$(document).bind('keydown', function(event) {
+		if( event.which === 66 ){
+			if($('#div_checkpoint').css('display')=='block'){
+				if(!$('#checkpoint').is(':disabled')){
+					setCP();	
+				}			
+			}
+		}
+
+	});
+	
+	function clearsess(){
+		jQuery.ajax({
+			url: '../support/checkpoint-action.php',
+			type: "POST",
+			data: {func: "clear_session", moduleindex: moduleindex,},
+			success: function(data){
+				window.location.reload(true);
+			}
+		});
+	}
+</script>
+<div id="checklist" style="position: fixed; top: 95px; right: 0px; width: 100px; border: 2px solid; background-color: white;"><table width="100%"><tbody><tr><th><u>Checklist</u></th></tr><tr style="text-align: center;"><td><a href="javascript:clearsess(); ">Reset</a></td></tr><tr style="text-align: center; background-color:#00CC00;"><td>RCM</td></tr></tbody></table></div>
+<div id="div_checkpoint" style="position: fixed; bottom: 0px; right: 0px; height: 50px; width: 160px; border: 2px solid; background-color: white;">
+	<table id="cpTable" style="width:100%">
+		<tbody><tr style="background-color: #0C63AF;"><th style="font-weight: bold; font-size: 14px; color:white;">Checkpoint (B)</th><th><a href="javascript:void(0);" onclick="hideCheckbox();" style="color:white;">X</a></th></tr><tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>
+			</tbody></table>
+</div>
+
+
+<div id="checklist"></div>
+<div id="div_checkpoint"></div>
+<form name="myForm" method="post">
+<br>
+<div style="width: 100%;">
+	<div style="width: 50%; float: left;">
+		<div class="maincaption">Check NIW Semi Cash CCL</div>
+		<div class="search">
+			<table class="tableheader">
+				<tbody><tr>
+					<td>Nasa&nbsp;</td>
+					<td>
+						<select name="companycode" id="companycode" onchange="trigger_submit_action();companyAuto(this);">
+															<option value="RCM">RCM</option>
+															<option value="LRCM">LRCM</option>
+													</select>&nbsp;&nbsp;&nbsp;&nbsp;
+					</td>
+					<td style="display:">Auto Refresh Time :&nbsp;</td>
+					<td style="display:">
+						<select name="refresh_timer" id="refresh_timer" onchange="change_refresh_timer(this.value)">
+							<option value="0">stop</option>
+															<option value="60">1 mins</option>
+															<option value="120">2 mins</option>
+															<option value="180" selected="">3 mins</option>
+															<option value="240">4 mins</option>
+															<option value="300">5 mins</option>
+													</select>
+					</td>
+					<td style="display:"><span style="display:" id="timer">177</span>	&nbsp;&nbsp;&nbsp;&nbsp;</td>
+					<td><a href="javascript:submit_action('select');">Refresh </a>&nbsp;&nbsp;</td>
+					<td><span id="back_b" style="display: none;"><a href="javascript:submit_action('select');">back</a></span></td>
+					<input type="hidden" id="pagelevel" name="pagelevel" value="m">
+					<td><input type="checkbox" id="myCheck" name="myCheck" value="m" checked="" onclick="submit_action('select');">cache</td>
+				</tr>
+			</tbody></table>
+		</div>
+		<br>
+		<span id="data_count" name="data_count" style="display: block;"><div class="dataerror"><table border="0" cellpadding="1" cellspacing="1" class="report" style="min-width:500px;"><thead><tr><th>NO</th><th>Company</th><th>Type</th><th>Error</th><th>Last Cache</th></tr></thead><tbody><tr><td rowspan="1">1</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('s0001','3','RCM','132','m','select')">s0001</a></td><td>sport</td><td id="error_count_s0001_3" class="error_count_s0001_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','s0001','3','m','3')">0</a></td><td id="cache_s0001_3"></td></tr><tr></tr><tr><td rowspan="1">2</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0005','9','RCM','132','m','select')">d0005</a></td><td>sport</td><td id="error_count_d0005_3" class="error_count_d0005_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','d0005','9','m','3')">0</a></td><td id="cache_d0005_3"></td></tr><tr></tr><tr><td rowspan="1">3</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0008','13','RCM','132','m','select')">d0008</a></td><td>sport</td><td id="error_count_d0008_3" class="error_count_d0008_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','d0008','13','m','3')">0</a></td><td id="cache_d0008_3"></td></tr><tr></tr><tr><td rowspan="1">4</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0009','14','RCM','132','m','select')">d0009</a></td><td>sport</td><td id="error_count_d0009_3" class="error_count_d0009_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','d0009','14','m','3')">0</a></td><td id="cache_d0009_3"></td></tr><tr></tr><tr><td rowspan="1">5</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0011','16','RCM','132','m','select')">d0011</a></td><td>sport</td><td id="error_count_d0011_3" class="error_count_d0011_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','d0011','16','m','3')">0</a></td><td id="cache_d0011_3"></td></tr><tr></tr><tr><td rowspan="1">6</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0012','17','RCM','132','m','select')">d0012</a></td><td>sport</td><td id="error_count_d0012_3" class="error_count_d0012_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','d0012','17','m','3')">0</a></td><td id="cache_d0012_3"></td></tr><tr></tr><tr><td rowspan="1">7</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0013','18','RCM','132','m','select')">d0013</a></td><td>sport</td><td id="error_count_d0013_3" class="error_count_d0013_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_d0013_3">-</td></tr><tr></tr><tr><td rowspan="1">8</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0015','19','RCM','132','m','select')">d0015</a></td><td>sport</td><td id="error_count_d0015_3" class="error_count_d0015_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','d0015','19','m','3')">0</a></td><td id="cache_d0015_3"></td></tr><tr></tr><tr><td rowspan="1">9</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('d0032','36','RCM','132','m','select')">d0032</a></td><td>sport</td><td id="error_count_d0032_3" class="error_count_d0032_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_d0032_3">-</td></tr><tr></tr><tr><td rowspan="1">10</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('p0001','21','RCM','132','m','select')">p0001</a></td><td>sport</td><td id="error_count_p0001_3" class="error_count_p0001_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_p0001_3">-</td></tr><tr></tr><tr><td rowspan="1">11</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('p0002','22','RCM','132','m','select')">p0002</a></td><td>sport</td><td id="error_count_p0002_3" class="error_count_p0002_3"><a style="cursor: pointer;color:blue;" onclick="detail_action('select','p0002','22','m','3')">0</a></td><td id="cache_p0002_3"></td></tr><tr></tr><tr><td rowspan="1">12</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('p0003','23','RCM','132','m','select')">p0003</a></td><td>sport</td><td id="error_count_p0003_3" class="error_count_p0003_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_p0003_3">-</td></tr><tr></tr><tr><td rowspan="1">13</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('p0005','25','RCM','132','m','select')">p0005</a></td><td>sport</td><td id="error_count_p0005_3" class="error_count_p0005_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_p0005_3">-</td></tr><tr></tr><tr><td rowspan="1">14</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('j0001','33','RCM','132','m','select')">j0001</a></td><td>sport</td><td id="error_count_j0001_3" class="error_count_j0001_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_j0001_3">-</td></tr><tr></tr><tr><td rowspan="1">15</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('f0001','1001','RCM','132','m','select')">f0001</a></td><td>sport</td><td id="error_count_f0001_3" class="error_count_f0001_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_f0001_3">-</td></tr><tr></tr><tr><td rowspan="1">16</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('j0002','1003','RCM','132','m','select')">j0002</a></td><td>sport</td><td id="error_count_j0002_3" class="error_count_j0002_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_j0002_3">-</td></tr><tr></tr><tr><td rowspan="1">17</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('p0008','1005','RCM','132','m','select')">p0008</a></td><td>sport</td><td id="error_count_p0008_3" class="error_count_p0008_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_p0008_3">-</td></tr><tr></tr><tr><td rowspan="1">18</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('s0010','3003','RCM','132','m','select')">s0010</a></td><td>sport</td><td id="error_count_s0010_3" class="error_count_s0010_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_s0010_3">-</td></tr><tr></tr><tr><td rowspan="1">19</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('k0002','3004','RCM','132','m','select')">k0002</a></td><td>sport</td><td id="error_count_k0002_3" class="error_count_k0002_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_k0002_3">-</td></tr><tr></tr><tr><td rowspan="1">20</td><td rowspan="1"><a href="javascript:void(0)" onclick="refresh_action('tq001','4002','RCM','132','m','select')">tq001</a></td><td>sport</td><td id="error_count_tq001_3" class="error_count_tq001_3"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td><td id="cache_tq001_3">-</td></tr><tr></tr></tbody></table></div></span>
+		<div id="data_record"><span id="data_record_s0001" name="data_record_s0001" style="display:none"></span><span id="data_ccl_record_s0001" name="data_edit_record_s0001" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_s0001" name="data_error_s0001">&nbsp;</span><span id="data_record_d0005" name="data_record_d0005" style="display:none"></span><span id="data_ccl_record_d0005" name="data_edit_record_d0005" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0005" name="data_error_d0005">&nbsp;</span><span id="data_record_d0008" name="data_record_d0008" style="display:none"></span><span id="data_ccl_record_d0008" name="data_edit_record_d0008" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0008" name="data_error_d0008">&nbsp;</span><span id="data_record_d0009" name="data_record_d0009" style="display:none"></span><span id="data_ccl_record_d0009" name="data_edit_record_d0009" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0009" name="data_error_d0009">&nbsp;</span><span id="data_record_d0011" name="data_record_d0011" style="display:none"></span><span id="data_ccl_record_d0011" name="data_edit_record_d0011" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0011" name="data_error_d0011">&nbsp;</span><span id="data_record_d0012" name="data_record_d0012" style="display:none"></span><span id="data_ccl_record_d0012" name="data_edit_record_d0012" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0012" name="data_error_d0012">&nbsp;</span><span id="data_record_d0013" name="data_record_d0013" style="display:none"></span><span id="data_ccl_record_d0013" name="data_edit_record_d0013" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0013" name="data_error_d0013">&nbsp;</span><span id="data_record_d0015" name="data_record_d0015" style="display:none"></span><span id="data_ccl_record_d0015" name="data_edit_record_d0015" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0015" name="data_error_d0015">&nbsp;</span><span id="data_record_d0032" name="data_record_d0032" style="display:none"></span><span id="data_ccl_record_d0032" name="data_edit_record_d0032" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_d0032" name="data_error_d0032">&nbsp;</span><span id="data_record_p0001" name="data_record_p0001" style="display:none"></span><span id="data_ccl_record_p0001" name="data_edit_record_p0001" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_p0001" name="data_error_p0001">&nbsp;</span><span id="data_record_p0002" name="data_record_p0002" style="display:none"></span><span id="data_ccl_record_p0002" name="data_edit_record_p0002" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_p0002" name="data_error_p0002">&nbsp;</span><span id="data_record_p0003" name="data_record_p0003" style="display:none"></span><span id="data_ccl_record_p0003" name="data_edit_record_p0003" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_p0003" name="data_error_p0003">&nbsp;</span><span id="data_record_p0005" name="data_record_p0005" style="display:none"></span><span id="data_ccl_record_p0005" name="data_edit_record_p0005" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_p0005" name="data_error_p0005">&nbsp;</span><span id="data_record_j0001" name="data_record_j0001" style="display:none"></span><span id="data_ccl_record_j0001" name="data_edit_record_j0001" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_j0001" name="data_error_j0001">&nbsp;</span><span id="data_record_f0001" name="data_record_f0001" style="display:none"></span><span id="data_ccl_record_f0001" name="data_edit_record_f0001" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_f0001" name="data_error_f0001">&nbsp;</span><span id="data_record_j0002" name="data_record_j0002" style="display:none"></span><span id="data_ccl_record_j0002" name="data_edit_record_j0002" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_j0002" name="data_error_j0002">&nbsp;</span><span id="data_record_p0008" name="data_record_p0008" style="display:none"></span><span id="data_ccl_record_p0008" name="data_edit_record_p0008" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_p0008" name="data_error_p0008">&nbsp;</span><span id="data_record_s0010" name="data_record_s0010" style="display:none"></span><span id="data_ccl_record_s0010" name="data_edit_record_s0010" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_s0010" name="data_error_s0010">&nbsp;</span><span id="data_record_k0002" name="data_record_k0002" style="display:none"></span><span id="data_ccl_record_k0002" name="data_edit_record_k0002" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_k0002" name="data_error_k0002">&nbsp;</span><span id="data_record_tq001" name="data_record_tq001" style="display:none"></span><span id="data_ccl_record_tq001" name="data_edit_record_tq001" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_tq001" name="data_error_tq001">&nbsp;</span></div>
+		<div class="remarksbox">
+			<span class="remark_title">Remarks:</span>
+			<ol class="remarks">
+			<li>Member red - click diff amt to "patch ccl" check hav different or not.
+				<br>~ if hav error, pls print screen 1st then patch ccl.
+				<!--br/>~ if below wsum hav red( betslip tbl not same with wsum ), pls click recal wsum. </li-->
+			<!--li>Agent red - Direct patch it.</li-->
+			</li><li>Cannot pending issue.</li>
+		</ol>
+		</div>
+	</div>
+	<div style="margin-left: 50%;">
+		<div class="maincaption">Check Credit CCL</div>
+		<div class="search">
+			<table class="tableheader">
+				<tbody><tr>
+					<!--td>Level :&nbsp;</td>
+					<td><a id="a_member" name="a_member" href="javascript:href_page('m');"><u>M</u>ember </a>&nbsp;|&nbsp;</td>
+					<!--td><a id="a_agent" name="a_agent"href="javascript:href_page('ag')"><u>A</u>gent </a>	&nbsp;&nbsp;&nbsp;&nbsp;</td-->
+					<td>Auto Refresh Time :&nbsp;</td>
+					<td>
+						<select name="refresh_timer_credit" id="refresh_timer_credit" onchange="change_refresh_timer_credit(this.value)">
+							<option value="0">stop</option>
+															<option value="60">1 mins</option>
+															<option value="120">2 mins</option>
+															<option value="180" selected="">3 mins</option>
+															<option value="240">4 mins</option>
+															<option value="300">5 mins</option>
+													</select>
+					</td>
+					<td><span style="display:" id="timer_credit">177</span>	&nbsp;&nbsp;&nbsp;&nbsp;</td>
+					<!--td><a href="javascript:submit_action_credit('select');" >Refresh </a>&nbsp;&nbsp;</td-->
+					<td><span id="back_b_credit" style="display: none;"><a href="javascript:submit_action_credit('select');">back</a></span></td>
+					<input type="hidden" id="pagelevel_credit" name="pagelevel_credit" value="m">
+				</tr>
+			</tbody></table>
+		</div>
+		<br>
+		<span id="data_count_credit" name="data_count_credit" style="display: block;"><div class="dataerror"><table border="0" cellpadding="1" cellspacing="1" class="report" style="min-width:500px;"><thead><tr><th>NO</th><th>Company</th><th>Error</th></tr></thead><tbody><tr><td>1</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('s0001','3','RCM','132','m','select')">s0001</a></td><td id="error_count_credit_s0001" class="error_count_credit_s0001"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>2</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0005','9','RCM','132','m','select')">d0005</a></td><td id="error_count_credit_d0005" class="error_count_credit_d0005"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>3</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0008','13','RCM','132','m','select')">d0008</a></td><td id="error_count_credit_d0008" class="error_count_credit_d0008"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>4</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0009','14','RCM','132','m','select')">d0009</a></td><td id="error_count_credit_d0009" class="error_count_credit_d0009"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>5</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0011','16','RCM','132','m','select')">d0011</a></td><td id="error_count_credit_d0011" class="error_count_credit_d0011"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>6</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0012','17','RCM','132','m','select')">d0012</a></td><td id="error_count_credit_d0012" class="error_count_credit_d0012"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>7</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0013','18','RCM','132','m','select')">d0013</a></td><td id="error_count_credit_d0013" class="error_count_credit_d0013"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>8</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0015','19','RCM','132','m','select')">d0015</a></td><td id="error_count_credit_d0015" class="error_count_credit_d0015"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>9</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('d0032','36','RCM','132','m','select')">d0032</a></td><td id="error_count_credit_d0032" class="error_count_credit_d0032"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>10</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('s0010','3003','RCM','132','m','select')">s0010</a></td><td id="error_count_credit_s0010" class="error_count_credit_s0010"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr><tr><td>11</td><td><a href="javascript:void(0)" onclick="refresh_action_credit('k0002','3004','RCM','132','m','select')">k0002</a></td><td id="error_count_credit_k0002" class="error_count_credit_k0002"><img src="../images/loading.gif" alt="" width="10" height="10" border="0"></td></tr></tbody></table></div></span>
+		<div id="data_record_credit"><span id="data_record_credit_s0001" name="data_record_credit_s0001" style="display:none"></span><span id="data_ccl_record_credits0001" name="data_ccl_record_credits0001" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_credits0001" name="data_error_credits0001">&nbsp;</span><span id="data_record_credit_d0005" name="data_record_credit_d0005" style="display:none"></span><span id="data_ccl_record_creditd0005" name="data_ccl_record_creditd0005" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0005" name="data_error_creditd0005">&nbsp;</span><span id="data_record_credit_d0008" name="data_record_credit_d0008" style="display:none"></span><span id="data_ccl_record_creditd0008" name="data_ccl_record_creditd0008" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0008" name="data_error_creditd0008">&nbsp;</span><span id="data_record_credit_d0009" name="data_record_credit_d0009" style="display:none"></span><span id="data_ccl_record_creditd0009" name="data_ccl_record_creditd0009" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0009" name="data_error_creditd0009">&nbsp;</span><span id="data_record_credit_d0011" name="data_record_credit_d0011" style="display:none"></span><span id="data_ccl_record_creditd0011" name="data_ccl_record_creditd0011" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0011" name="data_error_creditd0011">&nbsp;</span><span id="data_record_credit_d0012" name="data_record_credit_d0012" style="display:none"></span><span id="data_ccl_record_creditd0012" name="data_ccl_record_creditd0012" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0012" name="data_error_creditd0012">&nbsp;</span><span id="data_record_credit_d0013" name="data_record_credit_d0013" style="display:none"></span><span id="data_ccl_record_creditd0013" name="data_ccl_record_creditd0013" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0013" name="data_error_creditd0013">&nbsp;</span><span id="data_record_credit_d0015" name="data_record_credit_d0015" style="display:none"></span><span id="data_ccl_record_creditd0015" name="data_ccl_record_creditd0015" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0015" name="data_error_creditd0015">&nbsp;</span><span id="data_record_credit_d0032" name="data_record_credit_d0032" style="display:none"></span><span id="data_ccl_record_creditd0032" name="data_ccl_record_creditd0032" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditd0032" name="data_error_creditd0032">&nbsp;</span><span id="data_record_credit_s0010" name="data_record_credit_s0010" style="display:none"></span><span id="data_ccl_record_credits0010" name="data_ccl_record_credits0010" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_credits0010" name="data_error_credits0010">&nbsp;</span><span id="data_record_credit_k0002" name="data_record_credit_k0002" style="display:none"></span><span id="data_ccl_record_creditk0002" name="data_ccl_record_creditk0002" style="left:820px;top:106px;position:absolute;"></span><span id="data_error_creditk0002" name="data_error_creditk0002">&nbsp;</span></div>
+		<div class="remarksbox">
+			<span class="remark_title">Remarks:</span>
+			<ol class="remarks">
+			<li>Member Yellow - click diff active bet to "patch ccl" check hav different or not.
+				<br>~ if hav error, pls print screen 1st then patch ccl.
+				<!--br/>~ if below wsum hav red( betslip tbl not same with wsum ), pls click recal wsum. </li-->
+			<!--li>Agent red - Direct patch it.</li-->
+			</li><li>Cannot pending issue.</li>
+		</ol>
+		</div>
+	</div>
+</div>
+</form>
+<script>countdown();  companyAuto(this);</script>
+<script>countdown_credit();</script>
+
+
+</body></html>

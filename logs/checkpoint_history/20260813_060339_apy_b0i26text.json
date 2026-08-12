@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-08-13 06:03:39",
+  "timestamp_raw": 1786572219.3361897,
+  "station_id": "apy_b0i26text",
+  "station_name": "第08站 NIW Robot Monitor",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【NIW Robot Monitor 全量巡检数据明细】:",
+    "--- [RCM Robot 列表 (共 532 个，显示前 10 条)] ---",
+    "   * Robot ID: 10 | Details: Nasa mapping SC Event | Interval: 30 | TimeStamp: 2026-08-12 18:03:32",
+    "   * Robot ID: 11 | Details: Nasa mapping BK Event | Interval: 30 | TimeStamp: 2026-08-12 18:03:30",
+    "   * Robot ID: 12 | Details: Nasa mapping OS Event | Interval: 30 | TimeStamp: 2026-08-12 18:03:35",
+    "   * Robot ID: 13 | Details: Nasa mapping OTR Event | Interval: 30 | TimeStamp: 2026-08-12 18:03:34",
+    "   * Robot ID: 20 | Details: Download Today Double Odds from Splus SC | Interval: 30 | TimeStamp: 2026-08-12 18:03:37",
+    "   * Robot ID: 21 | Details: Download Today Double Odds from Splus BK | Interval: 50 | TimeStamp: 2026-08-12 18:03:37",
+    "   * Robot ID: 22 | Details: Download Today Double Odds from Splus OS | Interval: 60 | TimeStamp: 2026-08-12 18:03:37",
+    "   * Robot ID: 23 | Details: Download Today Double Odds from Splus OTR | Interval: 30 | TimeStamp: 2026-08-12 18:03:37",
+    "   * Robot ID: 24 | Details: Download Today Others Odds from Splus SC | Interval: 50 | TimeStamp: 2026-08-12 18:03:35",
+    "   * Robot ID: 25 | Details: Download Running Odds from Splus SC | Interval: 10 | TimeStamp: 2026-08-12 18:03:37",
+    "   * ... (共 532 条，已省略 522 条)",
+    "--- [LRCM Robot 列表 (共 0 个，显示前 0 条)] ---"
+  ],
+  "table_data": {}
+}

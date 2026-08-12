@@ -263,12 +263,12 @@ class ErrorLogScraper:
         for row in all_rows:
             try:
                 row_text = row.text
-                # 如果这一行的文字里面有 "Records" 关键字，才说明它是我们要找的猎物
-                if "Records" in row_text:
+                # 如果这一行的文字里面有 "records" 关键字，才说明它是我们要找的猎物 (加上 .lower() 防止网站改大小写)
+                if "records" in row_text.lower():
                     # 用正则提取 IP (比如 10.x.x.x)
                     ip_match = re.search(r'(10\.\d{1,3}\.\d{1,3}\.\d{1,3})', row_text)
-                    # 用正则提取记录的数量 (比如 125 Records -> 提取出 125)
-                    count_match = re.search(r'(\d+)\s*Records', row_text, re.IGNORECASE)
+                    # 用正则提取记录的数量 (比如 125 records -> 提取出 125)
+                    count_match = re.search(r'(\d+)\s*records', row_text, re.IGNORECASE)
                     
                     if ip_match and count_match:
                         found_ip = ip_match.group(1)

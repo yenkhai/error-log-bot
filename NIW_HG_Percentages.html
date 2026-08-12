@@ -1,0 +1,294 @@
+<html><head>
+	<title></title>
+	<!--link rel="stylesheet" href="css/agency.css"--> 
+	<link href="css/om.css?v=1" rel="stylesheet" type="text/css">
+	<link rel="stylesheet" href="css/jquery/jquery.ui.all.css"> 
+	<script type="text/javascript" src="../../javascript/jquery.js"></script>
+	<script type="text/javascript" src="../../javascript/jquery/ui/jquery.ui.core.js"></script> 
+	<script type="text/javascript" src="../../javascript/jquery/ui/jquery.ui.widget.js"></script> 
+	<script type="text/javascript" src="../../javascript/jquery/ui/jquery.ui.datepicker.js"></script> 
+	<script language="JavaScript" src="javascript/nv03_percentage.js?v=2.24"></script>
+	<style>
+	td 			{ font-family: arial; font-size: 12px; color:black; text-align:center; font-weight:normal }
+	th			{ font-family: arial; font-size: 12px; color:black; text-align:center; font-weight:normal  }
+	
+	.search3{text-transform: capitalize;font: 10pt tahoma;	text-align:left;}
+	.search3 th{background: #EAEAEA;}
+	.search3 td{background: #EAEAEA;}
+	.hand{
+		cursor:hand;
+		display:block;
+	}
+	.ui-datepicker {
+		width: 165px; /*what ever width you want*/
+	}
+	</style>
+	<script> 
+		var la = new Array();
+		la['ag'] = 'Agent';
+		la['ma'] = 'Master Agent';
+		la['sh'] = 'Big Master Agent';
+		la['bsh'] = 'Big Shareholder';
+		la['bettype'] = 'Bet Type';
+		la['handicap'] = 'Handicap';
+		la['runningscore'] = 'R. Score';
+		la['totalbet'] = 'Total Bets';
+		la['win'] = 'Win';
+		la['loss'] = 'Loss';
+		la['stake'] = 'Stake';
+		la['onlinelist'] = 'Online List';
+		la['wagers'] = 'Bet slips';
+		la['reset'] = 'Reset';
+		la['resetall'] = 'Reset ALL';
+		la['allok'] = 'All records are correct.';
+		var nasa = ['RCM','LRCM'];
+		var errBackground = " style=\"background-color:red\"";
+		var company_rcm = {"nv05":{"s0010":3003,"k0002":3004}};
+		var company_lrcm = {"nv05":{"s0009":3001}};
+		var companies = {"LRCM":{"43":{"id":43,"company_code":"Nv01 - s0001","market":"0","remark":"test company  1","status":"1","api_url":"http:\/\/10.16.251.49\/s0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"88":{"id":88,"company_code":"Nv01 - s0002","market":"0","remark":"NIW test company 2","status":"1","api_url":"http:\/\/10.16.251.49\/s0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"96":{"id":96,"company_code":"Nv01 - testapi2","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.251.49\/s0003_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2019-03-01","products":[3]},"1001":{"id":1001,"company_code":"Nv02 - ag002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.251.49\/x0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"3001":{"id":3001,"company_code":"Nv05 - s0009","market":"0","remark":null,"status":"1","api_url":"http:\/\/10.16.251.49\/s0009_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-12-01","products":[3]},"4000":{"id":4000,"company_code":"Nv06 - t0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.101.10.49\/t0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]}},"RCM":{"3":{"id":3,"company_code":"Nv01 - s0001","market":"0","remark":"FBao","status":"1","api_url":"http:\/\/10.16.12.49\/s0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"9":{"id":9,"company_code":"Nv01 - d0005","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.12.49\/d0005_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"13":{"id":13,"company_code":"Nv01 - d0008","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0008_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"14":{"id":14,"company_code":"Nv01 - d0009","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.12.49\/d0009_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"15":{"id":15,"company_code":"Nv01 - d0010","market":"0","remark":"","status":"1","api_url":"null","action_status":"0","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"16":{"id":16,"company_code":"Nv01 - d0011","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0011_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"17":{"id":17,"company_code":"Nv01 - d0012","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0012_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"18":{"id":18,"company_code":"Nv01 - d0013","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.12.49\/d0011_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"19":{"id":19,"company_code":"Nv01 - d0015","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0015_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"36":{"id":36,"company_code":"Nv01 - d0032","market":"0","remark":"","status":"1","api_url":"http:\/\/10.16.102.49\/d0032_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"21":{"id":21,"company_code":"Nv01 - p0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.13.49\/p0001_robot\/public\/","action_status":"1","lock_cancel_wager":"1","lock_report_date":"2025-12-31","products":[3]},"22":{"id":22,"company_code":"Nv01 - p0002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.14.49\/p0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"23":{"id":23,"company_code":"Nv01 - p0003","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.15.49\/p0003_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"25":{"id":25,"company_code":"Nv01 - p0005","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.16.49\/p0005_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2025-12-31","products":[3]},"30":{"id":30,"company_code":"Nv01 - e2001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.19.49\/e2001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":null,"products":[3]},"33":{"id":33,"company_code":"Nv01 - j0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.17.49\/j0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":null,"products":[3]},"34":{"id":34,"company_code":"Nv01 - e1001","market":"2","remark":"API One Wallet Credit","status":"1","api_url":"http:\/\/10.16.18.49\/e1001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":null,"products":[3]},"1001":{"id":1001,"company_code":"Nv02 - f0001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.57.49\/f0001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1002":{"id":1002,"company_code":"Nv02 - e2002","market":"2","remark":"API One Wallet - Fabbet","status":"1","api_url":"http:\/\/10.16.50.49\/e2002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1003":{"id":1003,"company_code":"Nv02 - j0002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.52.49\/j0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1004":{"id":1004,"company_code":"Nv02 - e2003","market":"2","remark":"API One Wallet","status":"1","api_url":"http:\/\/10.16.51.49\/e2003_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1005":{"id":1005,"company_code":"Nv02 - p0008","market":"2","remark":"API Transfer Wallet","status":"1","api_url":"http:\/\/10.16.53.49\/p0008_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"1006":{"id":1006,"company_code":"Nv02 - e1002","market":"2","remark":"","status":"1","api_url":"http:\/\/10.16.56.49\/e1002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2023-01-01","products":[3]},"3003":{"id":3003,"company_code":"Nv05 - s0010","market":"0","remark":null,"status":"1","api_url":"http:\/\/10.16.90.49\/s0010_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2024-01-01","products":[3]},"3004":{"id":3004,"company_code":"Nv05 - k0002","market":"0","remark":null,"status":"1","api_url":"http:\/\/10.16.90.49\/k0002_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2024-01-01","products":[3]},"4002":{"id":4002,"company_code":"Nv06 - tq001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.101.10.59\/tq001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]},"4003":{"id":4003,"company_code":"Nv06 - eq001","market":"2","remark":"","status":"1","api_url":"http:\/\/10.101.10.69\/eq001_robot\/public\/","action_status":"1","lock_cancel_wager":"0","lock_report_date":"2016-01-01","products":[3]}}};
+		var products_name = {"3":"sport","4":"sporttery"};
+		$(document).ready(function(){
+			gtTable();
+		});
+		var modi="&modu= 126&modi= 150";
+        	var managerindex = '248';
+        	var moduleindex = 150; 
+		var acclvl = 'super';
+		var accuser = 'op';
+		
+		window.onload=function(){
+			//self.focus();
+		}
+
+
+	</script>
+</head>
+<body>
+<script language="JavaScript">
+	var arr = [];
+	var managerindex = '248';
+	var moduleindex = '150';
+	var cp_filter = '["A0099","B0099","LRCM"]';
+	var duplicate_check=1;
+	function setCP(){
+		if(duplicate_check==1){
+			var cp = document.getElementById('checkpoint');
+			duplicate_check=0;
+			jQuery.ajax({
+				url: '../support/checkpoint-action.php',
+				type: "POST",
+				data: {func: "add_checkpoint", managerindex: managerindex, moduleindex: moduleindex},
+				success: function(data){
+					$("#checkpoint_status").text(data);
+					$('#checkpoint').attr("disabled", true);
+				}
+			});
+		}else{
+			alert('Please Wait action is complete')
+		}
+	}
+	
+	function companyAuto(option_value){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com'] option:selected").val();
+		var chk_tb = '';
+		//var t = $("a[id*='a_']").text();
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('A0099');
+							chk_filter.push('B0099');
+							chk_filter.push('LRCM');
+			
+
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) == '-1'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}	
+			}else{
+				cp_exist = true;
+				count--;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		/*if(cp_exist == true){
+			count = count-chk_filter.length;
+		}*/
+			
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function companySearch(){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com']").val();
+		var chk_tb ='';
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('A0099');
+								chk_filter.push('B0099');
+								chk_filter.push('LRCM');
+					
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) != '0'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}
+			}else{
+				cp_exist = true;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		if(cp_exist == true){
+			count = count-chk_filter.length;
+		}
+		
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function hideCheckbox(){
+		$('#checkpoint').disabled = true;
+		$('#div_checkpoint').hide();
+	}
+	
+	function showCheckbox(){
+		$('#checkpoint').disabled = false;
+		$('#div_checkpoint').show();
+	}
+
+	$(document).ready(function(){
+		$(":button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+		
+		$("#id_search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#div_checkpoint').show();
+		});
+		
+		$("#search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+	});
+	
+	$(document).bind('keydown', function(event) {
+		if( event.which === 66 ){
+			if($('#div_checkpoint').css('display')=='block'){
+				if(!$('#checkpoint').is(':disabled')){
+					setCP();	
+				}			
+			}
+		}
+
+	});
+	
+	function clearsess(){
+		jQuery.ajax({
+			url: '../support/checkpoint-action.php',
+			type: "POST",
+			data: {func: "clear_session", moduleindex: moduleindex,},
+			success: function(data){
+				window.location.reload(true);
+			}
+		});
+	}
+</script>
+<div id="checklist" style="position: fixed; top: 95px; right: 0px; width: 100px; border: 2px solid; background-color: white;"><table width="100%"><tbody><tr><th><u>Checklist</u></th></tr><tr style="text-align: center;"><td><a href="javascript:clearsess(); ">Reset</a></td></tr><tr style="text-align: center; background-color:#00CC00;"><td>RCM</td></tr></tbody></table></div>
+<div id="div_checkpoint" style="position: fixed; bottom: 0px; right: 0px; height: 50px; width: 160px; border: 2px solid; background-color: white;">
+	<table id="cpTable" style="width:100%">
+		<tbody><tr style="background-color: #0C63AF;"><th style="font-weight: bold; font-size: 14px; color:white;">Checkpoint (B)</th><th><a href="javascript:void(0);" onclick="hideCheckbox();" style="color:white;">X</a></th></tr><tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>
+			</tbody></table>
+</div>
+
+
+	<script>
+	function gtTable(){
+		var str="";
+		str+="<div class='maincaption'>HG Percentages</div>";
+		str+="<div id='div_error' style='display:none;' class='error' ></div>";
+		str+="<div class='search'>";
+		str+="<table class='search3'>";
+		str+="<tr>";
+		str+="<th>Company</th>";
+		str+="<td><select id='com_option' name='com_option'>";
+		for(var i in nasa){
+			str+="<option value='"+nasa[i]+"'>"+nasa[i]+"</option>";
+		}
+		str+="</select></td>";
+		str+="<td><input type='checkbox' id='id_three' value='' onclick='gtLoop();companyAuto(this);' checked='checked' />3 days records</td>";
+		str+="<th></th>";
+		str+="<td><span class='buttons'><a href='javascript:void(0)' id='id_search_btn' onclick='gtLoop();companyAuto(this);' class='submit'><u>S</u>earch</a></span></td>";
+		str+="</tr>";
+		str+="</table>";
+		str+="</div>";
+		$('#div_search').html(str);
+		gtLoop();companyAuto(this);	}
+	</script>
+	<br>
+	<form name="myForm" id="myForm" action="?">
+	<div id="div_search"><div class="maincaption">HG Percentages</div><div id="div_error" style="display:none;" class="error"></div><div class="search"><table class="search3"><tbody><tr><th>Company</th><td><select id="com_option" name="com_option"><option value="RCM">RCM</option><option value="LRCM">LRCM</option></select></td><td><input type="checkbox" id="id_three" value="" onclick="gtLoop();companyAuto(this);" checked="checked">3 days records</td><th></th><td><span class="buttons"><a href="javascript:void(0)" id="id_search_btn" onclick="gtLoop();companyAuto(this);" class="submit"><u>S</u>earch</a></span></td></tr></tbody></table></div></div>
+	</form>
+	<div id="div_listing"><table id="matchinfo" class="tablelist"><tbody><tr><th colspan="5">nv05</th></tr><tr><th width="80">Company</th><th width="150">Count (Editor)</th><th width="150">Editor</th><th width="150">Count (Betting)</th><th width="150">Betting</th></tr><tr><td rowspan="1"><a href="javascript:void(0)" onclick="gtAll('s0010','RCM','3003','3','true')">s0010</a></td><td id="ce_s0010_3" style="text-align:center;"><img src="../images/ajax-loader.gif" width="12" height="12"></td><td id="e_s0010_3" style="text-align:center;"><img src="../images/ajax-loader.gif" width="12" height="12"></td><td id="cb_s0010_3" style="text-align:center;"><img src="../images/ajax-loader.gif" width="12" height="12"></td><td id="b_s0010_3" style="text-align:center;"><img src="../images/ajax-loader.gif" width="12" height="12"></td></tr><tr></tr><tr><td rowspan="1"><a href="javascript:void(0)" onclick="gtAll('k0002','RCM','3004','3','true')">k0002</a></td><td id="ce_k0002_3" style="text-align:center;">0</td><td id="e_k0002_3" style="text-align: center; background-color: rgb(255, 255, 255); color: green;">Correct</td><td id="cb_k0002_3" style="text-align:center;">0</td><td id="b_k0002_3" style="text-align: center; background-color: rgb(255, 255, 255); color: green;">Correct</td></tr><tr></tr></tbody></table></div>
+	<div id="listing_float" style="position:absolute;display:none">
+		<!-- <div id="listing_com" style="background:#ffffff;border:1px solid #000;">
+			<span style="float:left; padding-left:10px;font-weight:bold">Company:</span>
+			<span id ="comcode"style="float:left;font-weight:bold;padding-left:10px;color:red"> - </span>
+			<span onclick="closeupd()" style="float:right;cursor:pointer;font-weight:bold">[ X ]</span></th>
+		</div> -->
+		<div id="listing_detail"></div>
+	</div>
+	<div class="remarksbox">
+	<span class="remark_title">Remarks:</span>
+	<ol class="remarks">
+		<li>Have error, pls call developer.</li>
+	</ol>
+	</div>
+	<div id="div_editor" style="position:absolute; z-index:1;"></div>
+	<iframe name="iframe_r" id="iframe_r" style="display:none;" height="300" width="800"></iframe>
+
+
+
+</body></html>

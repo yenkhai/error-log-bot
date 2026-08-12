@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-08-12 21:21:15",
+  "timestamp_raw": 1786540875.2219148,
+  "station_id": "apy_b0i9text",
+  "station_name": "第8站 RPT AI",
+  "status": "SUCCESS",
+  "summary_list": [
+    "RPT AI 表格核对完毕，没有发现红字/error 报错。"
+  ],
+  "table_data": {}
+}

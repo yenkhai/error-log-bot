@@ -1,0 +1,308 @@
+<html><head>
+<title>Recalculate Tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../bootstrap/css/bootstrap.min.css">
+<link rel="stylesheet" href="../css/datepicker.css">
+<link rel="stylesheet" href="../css/style.css">
+<script type="text/javascript" src="../javascript/jquery-1.8.0.min.js"></script>
+<script type="text/javascript" src="../javascript/bootstrap-datepicker.js"></script>
+<script type="text/javascript" src="../javascript/jquery.event.drag-1.5.min.js"></script>
+<script type="text/javascript" src="../javascript/recalculate.js?rd=221605746"></script>
+<script>
+    var companylist = {"RCM":"TITLE","RCM-D0005":"RCM - D0005","RCM-D0008":"RCM - D0008","RCM-D0009":"RCM - D0009","RCM-D0011":"RCM - D0011","RCM-D0012":"RCM - D0012","RCM-D0013":"RCM - D0013","RCM-D0015":"RCM - D0015","RCM-D0032":"RCM - D0032","RCM-P0001":"RCM - P0001","RCM-P0002":"RCM - P0002","RCM-P0003":"RCM - P0003","RCM-P0005":"RCM - P0005","RCM-E1001":"RCM - E1001","RCM-E1002":"RCM - E1002","RCM-E2001":"RCM - E2001","RCM-E2002":"RCM - E2002","RCM-E2003":"RCM - E2003","RCM-J0002":"RCM - J0002","RCM-P0008":"RCM - P0008","RCM-J0001":"RCM - J0001","RCM-K0002":"RCM - K0002","RCM-TQ001":"RCM - TQ001","RCM-EQ001":"RCM - EQ001","RCM-F0001":"RCM - F0001","RCM-S0001":"RCM - S0001","RCM-S0010":"RCM - S0010","LRCM":"TITLE","LRCM-S0001":"LRCM - S0001","LRCM-S0002":"LRCM - S0002","LRCM-S0003":"LRCM - testapi2","LRCM-X0001":"LRCM - ag002","LRCM-S0009":"LRCM - S0009","LRCM-T0001":"LRCM - T0001"};
+    var compant_split = ["RCM-P0001","RCM-D0013"];
+    var gameList = {"1":"Soccer","2":"Basketball","OTH":"Other Sport"};
+    var sportteryGameList = {"61":"Sporttery Soccer","62":"Sporttery Basketball"};
+	var companyGame = {"RCM-D0005":["sport"],"RCM-D0008":["sport"],"RCM-D0009":["sport"],"RCM-D0011":["sport"],"RCM-D0012":["sport"],"RCM-D0013":["sport"],"RCM-D0015":["sport"],"RCM-D0032":["sport"],"RCM-P0001":["sport"],"RCM-P0002":["sport"],"RCM-P0003":["sport"],"RCM-P0005":["sport"],"RCM-E1001":["sport"],"RCM-E1002":["sport"],"RCM-E2001":["sport"],"RCM-E2002":["sport"],"RCM-E2003":["sport"],"RCM-J0002":["sport"],"RCM-P0008":["sport"],"RCM-J0001":["sport"],"RCM-K0002":["sport"],"RCM-TQ001":["sport"],"RCM-EQ001":["sport"],"RCM-S0001":["sport"],"RCM-S0010":["sport"],"LRCM-S0001":["sport"],"LRCM-S0002":["sport"],"LRCM-S0003":["sport"],"LRCM-X0001":["sport"],"LRCM-S0009":["sport"],"LRCM-T0001":["sport"]};
+    var gameListSpecial = {"255":"Special"};
+    var companyGameSpecial = {"LRCM-X0001":1,"RCM-F0001":1,"RCM-E1002":1,"RCM-E2002":1,"RCM-J0002":1,"RCM-E2003":1,"RCM-P0008":1};
+    var todayDate = '2026-07-26';
+    //var todayDate = '27-04-2018';
+    var accTypeList =  [3,1,0];
+    var posx =0;
+    var posy =0;
+   
+</script>
+<style>
+    
+.recalTable thead {
+    position: sticky;
+    top: 40px;
+    border: 1px solid #000000;
+}
+</style>
+</head>
+<body>
+<script language="JavaScript">
+	var arr = [];
+	var managerindex = '248';
+	var moduleindex = '107';
+	var cp_filter = '["RCM-S0001","RCM-S0010","RCM-F0001","LRCM-S0001","LRCM-S0002","LRCM-S0003","LRCM-X0001","LRCM-ag002","LRCM-S0009","LRCM-T0001"]';
+	var duplicate_check=1;
+	function setCP(){
+		if(duplicate_check==1){
+			var cp = document.getElementById('checkpoint');
+			duplicate_check=0;
+			jQuery.ajax({
+				url: '../../../ccl_check/support/checkpoint-action.php',
+				type: "POST",
+				data: {func: "add_checkpoint", managerindex: managerindex, moduleindex: moduleindex},
+				success: function(data){
+					$("#checkpoint_status").text(data);
+					$('#checkpoint').attr("disabled", true);
+				}
+			});
+		}else{
+			alert('Please Wait action is complete')
+		}
+	}
+	
+	function companyAuto(option_value){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com'] option:selected").val();
+		var chk_tb = '';
+		//var t = $("a[id*='a_']").text();
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('RCM-S0001');
+							chk_filter.push('RCM-S0010');
+							chk_filter.push('RCM-F0001');
+							chk_filter.push('LRCM-S0001');
+							chk_filter.push('LRCM-S0002');
+							chk_filter.push('LRCM-S0003');
+							chk_filter.push('LRCM-X0001');
+							chk_filter.push('LRCM-ag002');
+							chk_filter.push('LRCM-S0009');
+							chk_filter.push('LRCM-T0001');
+			
+
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) == '-1'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}	
+			}else{
+				cp_exist = true;
+				count--;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		/*if(cp_exist == true){
+			count = count-chk_filter.length;
+		}*/
+			
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function companySearch(){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com']").val();
+		var chk_tb ='';
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('RCM-S0001');
+								chk_filter.push('RCM-S0010');
+								chk_filter.push('RCM-F0001');
+								chk_filter.push('LRCM-S0001');
+								chk_filter.push('LRCM-S0002');
+								chk_filter.push('LRCM-S0003');
+								chk_filter.push('LRCM-X0001');
+								chk_filter.push('LRCM-ag002');
+								chk_filter.push('LRCM-S0009');
+								chk_filter.push('LRCM-T0001');
+					
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) != '0'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}
+			}else{
+				cp_exist = true;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		if(cp_exist == true){
+			count = count-chk_filter.length;
+		}
+		
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function hideCheckbox(){
+		$('#checkpoint').disabled = true;
+		$('#div_checkpoint').hide();
+	}
+	
+	function showCheckbox(){
+		$('#checkpoint').disabled = false;
+		$('#div_checkpoint').show();
+	}
+
+	$(document).ready(function(){
+		$(":button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+		
+		$("#id_search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#div_checkpoint').show();
+		});
+		
+		$("#search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+	});
+	
+	$(document).bind('keydown', function(event) {
+		if( event.which === 66 ){
+			if($('#div_checkpoint').css('display')=='block'){
+				if(!$('#checkpoint').is(':disabled')){
+					setCP();	
+				}			
+			}
+		}
+
+	});
+	
+	function clearsess(){
+		jQuery.ajax({
+			url: '../../../ccl_check/support/checkpoint-action.php',
+			type: "POST",
+			data: {func: "clear_session", moduleindex: moduleindex,},
+			success: function(data){
+				window.location.reload(true);
+			}
+		});
+	}
+</script>
+<div id="checklist" style="position: fixed; top: 95px; right: 0px; width: 100px; border: 2px solid; background-color: white;"><table width="100%"><tbody><tr><th><u>Checklist</u></th></tr><tr style="text-align: center;"><td><a href="javascript:clearsess(); ">Reset</a></td></tr><tr style="text-align: center; background-color:#00CC00;"><td>RCM-D0005</td></tr><tr style="text-align: center;"><td>RCM-D0008</td></tr><tr style="text-align: center;"><td>RCM-D0009</td></tr><tr style="text-align: center;"><td>RCM-D0011</td></tr><tr style="text-align: center;"><td>RCM-D0012</td></tr><tr style="text-align: center;"><td>RCM-D0013</td></tr><tr style="text-align: center;"><td>RCM-D0015</td></tr><tr style="text-align: center;"><td>RCM-D0032</td></tr><tr style="text-align: center;"><td>RCM-P0001</td></tr><tr style="text-align: center;"><td>RCM-P0002</td></tr><tr style="text-align: center;"><td>RCM-P0003</td></tr><tr style="text-align: center;"><td>RCM-P0005</td></tr><tr style="text-align: center;"><td>RCM-E1001</td></tr><tr style="text-align: center;"><td>RCM-E1002</td></tr><tr style="text-align: center;"><td>RCM-E2001</td></tr><tr style="text-align: center;"><td>RCM-E2002</td></tr><tr style="text-align: center;"><td>RCM-E2003</td></tr><tr style="text-align: center;"><td>RCM-J0002</td></tr><tr style="text-align: center;"><td>RCM-P0008</td></tr><tr style="text-align: center;"><td>RCM-J0001</td></tr><tr style="text-align: center;"><td>RCM-K0002</td></tr><tr style="text-align: center;"><td>RCM-TQ001</td></tr><tr style="text-align: center;"><td>RCM-EQ001</td></tr></tbody></table></div>
+<div id="div_checkpoint" style="display: none; position: fixed; bottom: 0; right: 0; height:50px; width:160px; border: 2px solid; background-color: white;">
+	<table id="cpTable" style="width:100%">
+		<tbody><tr style="background-color: #0C63AF;"><th style="font-weight: bold; font-size: 14px; color:white;">Checkpoint (B)</th><th><a href="javascript:void(0);" onclick="hideCheckbox();" style="color:white;">X</a></th></tr>
+			</tbody></table>
+</div>
+
+
+<nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark text-light">
+<div class="container-fluid">
+<form id="myForm">
+<span class="label"><strong>Company:</strong></span>
+<select name="company" id="company" onchange="callCalcuate(1);companyAuto(this);"><optgroup label="RCM"></optgroup><option value="RCM-D0005">RCM - D0005</option><option value="RCM-D0008">RCM - D0008</option><option value="RCM-D0009">RCM - D0009</option><option value="RCM-D0011">RCM - D0011</option><option value="RCM-D0012">RCM - D0012</option><option value="RCM-D0013">RCM - D0013</option><option value="RCM-D0015">RCM - D0015</option><option value="RCM-D0032">RCM - D0032</option><option value="RCM-P0001">RCM - P0001</option><option value="RCM-P0002">RCM - P0002</option><option value="RCM-P0003">RCM - P0003</option><option value="RCM-P0005">RCM - P0005</option><option value="RCM-E1001">RCM - E1001</option><option value="RCM-E1002">RCM - E1002</option><option value="RCM-E2001">RCM - E2001</option><option value="RCM-E2002">RCM - E2002</option><option value="RCM-E2003">RCM - E2003</option><option value="RCM-J0002">RCM - J0002</option><option value="RCM-P0008">RCM - P0008</option><option value="RCM-J0001">RCM - J0001</option><option value="RCM-K0002">RCM - K0002</option><option value="RCM-TQ001">RCM - TQ001</option><option value="RCM-EQ001">RCM - EQ001</option><option value="RCM-F0001">RCM - F0001</option><option value="RCM-S0001">RCM - S0001</option><option value="RCM-S0010">RCM - S0010</option><optgroup label="LRCM"></optgroup><option value="LRCM-S0001">LRCM - S0001</option><option value="LRCM-S0002">LRCM - S0002</option><option value="LRCM-S0003">LRCM - testapi2</option><option value="LRCM-X0001">LRCM - ag002</option><option value="LRCM-S0009">LRCM - S0009</option><option value="LRCM-T0001">LRCM - T0001</option></select>
+<span class="label ml-1"><strong>Games:</strong></span>
+<select name="games" id="games" onchange="getBettypeList()"><option value="" selected="">All Game</option><option value="1">Soccer</option><option value="2">Basketball</option><option value="OTH">Other Sport</option></select>
+<span class="label ml-1"><strong>Bettype:</strong></span>
+<select name="bettype" id="bettype"><option value="all">All</option><option value="1">AH</option><option value="2">OU</option><option value="3">OE</option><option value="4">1X2</option><option value="5">TG</option><option value="6">HT</option><option value="7">CS</option><option value="8">RAH</option><option value="9">ROU</option><option value="10">ROE</option><option value="11">R1X2</option><option value="12">ML</option><option value="13">RML</option><option value="14">OTR</option><option value="15">MULP</option><option value="16">RCS</option><option value="17">RHT</option><option value="18">RTG</option><option value="19">DBCH</option><option value="20">RDBCH</option><option value="21">H1X2</option><option value="25">WD</option><option value="27">RH1X2</option><option value="28">HMG</option><option value="29">RHMG</option><option value="30">HMG1X2</option><option value="31">RHMG1X2</option><option value="32">BTTS</option><option value="33">RBTTS</option><option value="34">CSH</option><option value="35">RCSH</option><option value="36">TWN</option><option value="37">RTWN</option><option value="38">TWFB</option><option value="39">RTWFB</option><option value="40">TWEH</option><option value="41">RTWEH</option><option value="42">TWBH</option><option value="43">RTWBH</option><option value="44">TSBH</option><option value="45">RTSBH</option><option value="46">HTG</option><option value="47">RHTG</option><option value="48">ATG</option><option value="49">RATG</option><option value="50">WM</option><option value="51">RWM</option><option value="52">FLG</option><option value="53">HLDS</option><option value="54">ALDS</option><option value="55">RHLDS</option><option value="56">RALDS</option><option value="57">NOG</option><option value="58">RNOG</option><option value="59">OUOE</option><option value="60">OUBTTS</option><option value="61">ROUBTTS</option><option value="62">OUFTS</option><option value="63">1X2OU</option><option value="64">R1X2OU</option><option value="65">1X2BTTS</option><option value="66">R1X2BTTS</option><option value="67">1X2FTS</option><option value="68">DCOU</option><option value="69">RDCOU</option><option value="70">DCBTTS</option><option value="71">RDCBTTS</option><option value="72">DCFTS</option><option value="73">ROUOE</option><option value="74">EDG</option><option value="76">EI</option><option value="77">WMR</option><option value="78">RWMR</option><option value="79">REI</option><option value="80">HTR</option><option value="81">RHTR</option><option value="82">ATR</option><option value="83">RATR</option></select>
+<span class="label ml-1"><strong>Date:</strong></span>
+<input type="text" name="searchDate" id="searchDate" class="span2" value="" size="12">
+<button type="button" class="btn btn-primary ml-2 btn-sm " id="btnCalculate" style="height:25px;line-height: 0.25em">Calculate</button>
+<input type="hidden" id="action" name="action" value="recalculate">
+<input type="hidden" id="cid" name="cid" value="RCM-D0005">
+</form>
+</div>
+</nav>
+<div class="container-fluid text-left">
+    <table class="table table-bordered recalTable" style="max-width: 1050px " cellpadding="2" cellspacing="2">
+        <thead>
+        <tr>
+            <th rowspan="2" width="80px">Bettype</th>
+            <th colspan="2">Member</th>
+            <th colspan="2">Upline</th>
+            <th colspan="2">Company</th>
+            <th rowspan="2" width="90px">Total Betslips</th>
+            <th rowspan="2" width="90px">Cancel/Reject</th>
+            <!--th rowspan="2" width="70">No Result</t-->
+            <th rowspan="2" width="70px">Uncalculate</th>
+            <th rowspan="2" width="90px">Recalculate</th>
+        </tr>
+        <tr>
+            <th>DB</th>
+            <th>RC</th>
+            <th>DB</th>
+            <th>RC</th>
+            <th>DB</th>
+            <th>RC</th>
+        </tr>
+        </thead>
+	<tbody><tr><td colspan="12"><b>----- Normal  Bettype -----</b></td></tr>
+        </tbody><tbody id="contentah"></tbody>
+        <tbody id="contentou"></tbody>
+        <tbody id="content1"><tr><td>AH</td><td class="" style="text-align:right">-11,178.42</td><td class="" style="text-align:right">-11,178.42</td><td class="" style="text-align:right">10,075.39</td><td class="" style="text-align:right">10,075.39</td><td class="" style="text-align:right">1,103.02</td><td class="" style="text-align:right">1,103.02</td><td>43</td><td>0</td><td>0</td><td class="col-ok">OK</td></tr><tr><td>OU</td><td class="" style="text-align:right">-133.19</td><td class="" style="text-align:right">-133.19</td><td class="" style="text-align:right">119.89</td><td class="" style="text-align:right">119.89</td><td class="" style="text-align:right">13.29</td><td class="" style="text-align:right">13.29</td><td>1</td><td>0</td><td>0</td><td class="col-ok">OK</td></tr><tr><td>1X2</td><td class="" style="text-align:right">-930.00</td><td class="" style="text-align:right">-930.00</td><td class="" style="text-align:right">837.00</td><td class="" style="text-align:right">837.00</td><td class="" style="text-align:right">93.00</td><td class="" style="text-align:right">93.00</td><td>3</td><td>0</td><td>0</td><td class="col-ok">OK</td></tr><tr><td>MULP</td><td class="" style="text-align:right">-2,112.04</td><td class="" style="text-align:right">-2,112.04</td><td class="" style="text-align:right">1,900.82</td><td class="" style="text-align:right">1,900.82</td><td class="" style="text-align:right">211.20</td><td class="" style="text-align:right">211.20</td><td>16</td><td>0</td><td>0</td><td class="col-ok">OK</td></tr><tr class="total"><td> Total </td><td style="text-align:right">-14,353.63</td><td style="text-align:right">-14,353.63</td><td style="text-align:right">12,933.12</td><td style="text-align:right">12,933.12</td><td style="text-align:right">1,420.52</td><td style="text-align:right">1,420.52</td><td>63</td><td>0</td><td>0</td><td></td></tr></tbody>
+        <tbody><tr><td colspan="12"><b>----- Running Bettype -----<b></b></b></td></tr>
+        </tbody><tbody id="contentrah"></tbody>
+        <tbody id="contentrou"></tbody>
+        <tbody id="content2"><tr><td>RAH</td><td class="" style="text-align:right">-12,481.24</td><td class="" style="text-align:right">-12,481.24</td><td class="" style="text-align:right">11,257.33</td><td class="" style="text-align:right">11,257.33</td><td class="" style="text-align:right">1,223.90</td><td class="" style="text-align:right">1,223.90</td><td>192</td><td>2</td><td>0</td><td class="col-ok">OK</td></tr><tr><td>ROU</td><td class="" style="text-align:right">4,850.37</td><td class="" style="text-align:right">4,850.37</td><td class="" style="text-align:right">-4,345.59</td><td class="" style="text-align:right">-4,345.59</td><td class="" style="text-align:right">-504.79</td><td class="" style="text-align:right">-504.79</td><td>90</td><td>1</td><td>0</td><td class="col-ok">OK</td></tr><tr><td>RML</td><td class="" style="text-align:right">-283.47</td><td class="" style="text-align:right">-283.47</td><td class="" style="text-align:right">255.11</td><td class="" style="text-align:right">255.11</td><td class="" style="text-align:right">28.34</td><td class="" style="text-align:right">28.34</td><td>2</td><td>0</td><td>0</td><td class="col-ok">OK</td></tr><tr class="total"><td> Total </td><td style="text-align:right">-7,914.32</td><td style="text-align:right">-7,914.32</td><td style="text-align:right">7,166.87</td><td style="text-align:right">7,166.87</td><td style="text-align:right">747.46</td><td style="text-align:right">747.46</td><td>284</td><td>3</td><td>0</td><td></td></tr></tbody>
+    </table>
+</div>
+<div id="divFlex" class="flexdiv" style="display: none;"></div>
+<div id="divInfo" class="flexdiv"></div>
+<script>
+ $(document).ready(function(){
+        $(document).mousemove(function(e){
+            posx = e.pageX;
+            posy = e.pageY;
+        });
+
+        _drawCompany();
+        _drawGame();
+        $('#searchDate').datepicker({
+            format: 'yyyy-mm-dd'
+        }).val(todayDate);
+
+        $('#btnCalculate').bind('click',function(){
+            callCalcuate(2);
+			companyAuto(this);        });
+
+        $('#company').val('TITLE');
+		$('#cid').val('TITLE');
+        $('#games').val(0);
+        getBettypeList();
+        callCalcuate(2);
+    });
+</script>
+
+
+<div class="datepicker dropdown-menu"><div class="datepicker-days" style="display: block;"><table class=" table-condensed"><thead><tr><th class="prev">‹</th><th colspan="5" class="switch">July 2026</th><th class="next">›</th></tr><tr><th class="dow">Su</th><th class="dow">Mo</th><th class="dow">Tu</th><th class="dow">We</th><th class="dow">Th</th><th class="dow">Fr</th><th class="dow">Sa</th></tr></thead><tbody><tr><td class="day  old">28</td><td class="day  old">29</td><td class="day  old">30</td><td class="day ">1</td><td class="day ">2</td><td class="day ">3</td><td class="day ">4</td></tr><tr><td class="day ">5</td><td class="day ">6</td><td class="day ">7</td><td class="day ">8</td><td class="day ">9</td><td class="day ">10</td><td class="day ">11</td></tr><tr><td class="day ">12</td><td class="day ">13</td><td class="day ">14</td><td class="day ">15</td><td class="day ">16</td><td class="day ">17</td><td class="day ">18</td></tr><tr><td class="day ">19</td><td class="day ">20</td><td class="day ">21</td><td class="day ">22</td><td class="day ">23</td><td class="day ">24</td><td class="day ">25</td></tr><tr><td class="day ">26</td><td class="day  active">27</td><td class="day ">28</td><td class="day ">29</td><td class="day ">30</td><td class="day ">31</td><td class="day  new">1</td></tr><tr><td class="day  new">2</td><td class="day  new">3</td><td class="day  new">4</td><td class="day  new">5</td><td class="day  new">6</td><td class="day  new">7</td><td class="day  new">8</td></tr></tbody></table></div><div class="datepicker-months" style="display: none;"><table class="table-condensed"><thead><tr><th class="prev">‹</th><th colspan="5" class="switch">2026</th><th class="next">›</th></tr></thead><tbody><tr><td colspan="7"><span class="month">Jan</span><span class="month">Feb</span><span class="month">Mar</span><span class="month">Apr</span><span class="month">May</span><span class="month">Jun</span><span class="month active">Jul</span><span class="month">Aug</span><span class="month">Sep</span><span class="month">Oct</span><span class="month">Nov</span><span class="month">Dec</span></td></tr></tbody></table></div><div class="datepicker-years" style="display: none;"><table class="table-condensed"><thead><tr><th class="prev">‹</th><th colspan="5" class="switch">2020-2029</th><th class="next">›</th></tr></thead><tbody><tr><td colspan="7"><span class="year old">2019</span><span class="year">2020</span><span class="year">2021</span><span class="year">2022</span><span class="year">2023</span><span class="year">2024</span><span class="year">2025</span><span class="year active">2026</span><span class="year">2027</span><span class="year">2028</span><span class="year">2029</span><span class="year old">2030</span></td></tr></tbody></table></div></div></body></html>

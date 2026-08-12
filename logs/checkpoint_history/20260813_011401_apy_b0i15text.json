@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-08-13 01:14:01",
+  "timestamp_raw": 1786554841.1072016,
+  "station_id": "apy_b0i15text",
+  "station_name": "第13站 HG Percentages",
+  "status": "SUCCESS",
+  "summary_list": [
+    "HG Percentages 各项百分比比对数据全部分析完毕，全绿无错。"
+  ],
+  "table_data": {}
+}

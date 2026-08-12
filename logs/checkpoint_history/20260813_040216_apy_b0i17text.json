@@ -1,0 +1,31 @@
+{
+  "timestamp": "2026-08-13 04:02:16",
+  "timestamp_raw": 1786564936.531135,
+  "station_id": "apy_b0i17text",
+  "station_name": "第15站 1 Wallet Pending",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【1 Wallet Pending 全量巡检数据明细 (ALL)】:",
+    "--- [1. 左侧 Total Pending Transaction 板块 (Tier 1 规则/共 9 个节点)] ---",
+    "   * e1001 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * e1002 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * e2001 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * e2002 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * e2003 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * eq001 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * testapi2 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * ag002 (Sport): 120s = 0, Function = - [OK/正常]",
+    "   * t0001 (Sport): 120s = 0, Function = - [OK/正常]",
+    "--- [2. 右侧 5 大 API 挂起板块 (Tier 3 提醒/共 9 个节点)] ---",
+    "   * e1001 [OK/正常]",
+    "   * e1002 [OK/正常]",
+    "   * e2001 [OK/正常]",
+    "   * e2002 [OK/正常]",
+    "   * e2003 [OK/正常]",
+    "   * eq001 [OK/正常]",
+    "   * testapi2 [OK/正常]",
+    "   * ag002 [Tier 3 提醒/不阻断: Acknowledgement Api = 5]",
+    "   * t0001 [Tier 3 提醒/不阻断: Rollback Api = 1]"
+  ],
+  "table_data": {}
+}

@@ -1,0 +1,422 @@
+<html><head>
+		<link href="css/om.css" rel="stylesheet" type="text/css">
+		<script type="text/javascript" src="../../javascript/jquery-1_10_2_min.js"></script>
+		<script type="text/javascript" src="../javascript/calendar.js?v=3"></script>
+		<script type="text/javascript" src="../javascript/footer-calendar.js"></script>
+		<script type="text/javascript">
+			function search_data(){
+				var nasa_name = $('#com_select').val();
+				var start_date = $('#fr_start_date').val();
+				var end_date = $('#fr_end_date').val();
+				var fr_start_date = $('#fr_start_date').val();
+				var ag_arr = {"RCM":{"nv01":"nv01","nv02":"nv02","nv05":"nv05","nv06":"nv06"},"LRCM":{"nv01":"nv01","nv02":"nv02","nv05":"nv05","nv06":"nv06"}};
+				ag_arr = ag_arr[nasa_name];
+				date_api = [];
+				date_credit = [];
+				var limit = 0;
+				var num = 0;
+				var ag_row = 1;
+				var msDiff = Math.abs(Number(Date.parse(end_date)) - Number(Date.parse(start_date)));
+				if (start_date >= end_date){
+					alert ("Date Range Error!");
+				}else if(msDiff > 7948800000){
+					alert ("Month range allowed are 3 months only");
+				}else{
+					while(Date.parse(start_date) < Date.parse(end_date)){
+						limit++;
+						ag_row++;
+						var split_date = start_date.split('-');
+						var yyyy = split_date[0];
+						var mm = split_date[1];
+						var dd = split_date[2];
+						var date = dd+"/"+mm+"/"+yyyy; 
+						var last_date = (new Date(parseInt(yyyy), parseInt(mm), 0).getDate())+"/"+mm+"/"+yyyy;;
+						date_api.push(date+' - '+last_date);
+						
+						if(mm == '12'){
+							yyyy = parseInt(yyyy)+1;
+							var next_month = 1;
+						}else{
+							var next_month =  parseInt(mm) + 1;
+						}
+						var next_mm = (next_month < 10) ? '0'+next_month : next_month;
+						start_date = yyyy+"-"+next_mm+"-"+dd;
+					}
+					$.each(ag_arr, function(y,ag_ver){
+						date_credit[ag_ver] = [];
+						$.ajax({
+							type	: "POST",
+							url		: "rpt_crs-action.php",
+							async	: false,
+							data	: { 'start_date'	: fr_start_date, 
+										'end_date'		: end_date,
+										'nasa_name' 	: nasa_name,
+										'ag_ver' 		: ag_ver,
+										'limit'			: limit
+									},
+							success: function (result) {
+								result = $.parseJSON(result);
+								num = result.length;
+								$.each(result, function(index,key){
+									num--;
+									date_credit[ag_ver][num] = key;
+								});	
+							},
+							error: function (request, status, error) {
+							}
+						});
+					});
+					
+					var str = "";
+					var img_load = "<img src='../../images/load.gif' />";
+					str +="<table class='tablelist'><tr><th>Agency</th><th colspan='2'>API</th>";
+					str +="<th colspan='2'>Credit</th></tr>";	
+					$.each(ag_arr, function(y,ag_ver){
+						str +="<td rowspan='"+ag_row+"'>"+ag_ver+"</td>";	
+						$.each(date_api, function(k,x){
+							var split_date_api = x.split('-');
+							var start_api_id = (split_date_api[0]).trim().split('/');
+							var end_api_id = (split_date_api[1]).trim().split('/');
+							if(date_credit[ag_ver].hasOwnProperty(k)){
+								var split_date_credit = date_credit[ag_ver][k].split('-');
+								var start_credit_id = (split_date_credit[0]).trim().split('/');
+								var end_credit_id = (split_date_credit[1]).trim().split('/');
+								var td_credit = "<td width='200'><a href='javascript:void(0)' onClick=check_company('"+nasa_name+"',\'0\','"+(split_date_credit[0]).trim()+"','"+(split_date_credit[1]).trim()+"','"+start_credit_id[2]+start_credit_id[1]+start_credit_id[0]+"_"+end_credit_id[2]+end_credit_id[1]+end_credit_id[0]+"_credit_"+ag_ver+"','"+ag_ver+"') >"+date_credit[ag_ver][k]+"</a></td><td class='"+start_credit_id[2]+start_credit_id[1]+start_credit_id[0]+"_"+end_credit_id[2]+end_credit_id[1]+end_credit_id[0]+"_credit_"+ag_ver+"' width='100'>"+img_load+"</td>";
+							}else{
+								var td_credit = "<td colspan='2'>-</td>"; 
+							}
+							str+="<tr><td width='200'><a href='javascript:void(0)' onClick=check_company('"+nasa_name+"',\'2\','"+(split_date_api[0]).trim()+"','"+(split_date_api[1]).trim()+"','"+start_api_id[2]+start_api_id[1]+start_api_id[0]+"_"+end_api_id[2]+end_api_id[1]+end_api_id[0]+"_api_"+ag_ver+"','"+ag_ver+"') >"+x+"</a></td><td id='"+start_api_id[2]+start_api_id[1]+start_api_id[0]+"_"+end_api_id[2]+end_api_id[1]+end_api_id[0]+"_api_"+ag_ver+"' width='100'>"+img_load+"</td>"+td_credit+"</tr>";
+						});
+					});
+					str +="</table>";
+					var drawtable = $('#display_api').html(str);
+					$.when(drawtable).done( 
+						ajax_loadall(nasa_name,date_api,date_credit)
+					)
+				}
+			} 
+
+			function ajax_loadall(nasa_name,date_api,date_credit){
+				var ag_arr = {"RCM":{"nv01":"nv01","nv02":"nv02","nv05":"nv05","nv06":"nv06"},"LRCM":{"nv01":"nv01","nv02":"nv02","nv05":"nv05","nv06":"nv06"}};	
+				ag_arr = ag_arr[nasa_name];
+				$.each(ag_arr, function(k,ag_ver){
+					$.each(date_api, function(k,x){
+						var split_date_api = x.split('-');
+						ajax_getdata(nasa_name,'2',(split_date_api[0]).trim(),(split_date_api[1]).trim(),ag_ver);
+						if(date_credit[ag_ver].hasOwnProperty(k)){
+							var split_date_credit = date_credit[ag_ver][k].split('-');
+							ajax_getdata(nasa_name,'0',(split_date_credit[0]).trim(),(split_date_credit[1]).trim(),ag_ver);
+						}
+					});
+				});
+			}
+			
+			function check_company(nasa_name,type,start_date,end_date,id,ag_ver){
+				$("#"+id).html("<img src='../../images/load.gif' />");
+				ajax_getdata(nasa_name,type,start_date,end_date,ag_ver);
+			}
+
+			function ajax_getdata(nasa_name,comp_type,start_date,end_date,ag_ver){	
+				if(comp_type == 0){
+					var comp_name = 'credit';
+				}else if(comp_type == 2){
+					var comp_name = 'api';
+				}
+
+				var start_id = start_date.split('/');
+				var end_id = end_date.split('/');
+				start_date = start_id[2]+"-"+start_id[1]+"-"+start_id[0];
+				end_date = end_id[2]+"-"+end_id[1]+"-"+end_id[0];
+				var id_name = start_id[2]+start_id[1]+start_id[0]+"_"+end_id[2]+end_id[1]+end_id[0]+"_"+comp_name+"_"+ag_ver;
+				$.ajax({
+					type	: "POST",
+					url		: "rpt_crs-action.php",
+					cache	: false,
+					data	: { 'start_date'	: start_date, 
+								'end_date'		: end_date,
+								'nasa_name' 	: nasa_name,
+								'comp_type' 	: comp_type,
+								'ag_ver' 		: ag_ver,
+								'action' 		: 'compare'
+							 },
+					success: function (result) {
+						result = $.parseJSON(result); 
+						
+						$.each(result['comp'], function(index,key){
+							if (key == 'yes'){
+								var message = 'ok';
+								var bgc = "#00cc00";
+							}else if (key == 'process'){
+								var message = 'processing';
+								var bgc = "yellow";
+							}else{	
+								var message = "<a style='color:blue;cursor:pointer;' onclick=recal_act('"+nasa_name+"','"+start_date+"','"+end_date+"','"+comp_type+"','"+id_name+"','"+ag_ver+"');>error</a>";
+								var bgc = "#ff0000";
+							}
+							$("#"+id_name).html(message);
+							$("#"+id_name).css('background-color', bgc);
+							$("."+id_name).html(message);
+							$("."+id_name).css('background-color', bgc);
+						});	
+					},
+					error: function (request, status, error) {
+				    }
+				});
+			}
+			function recal_act(nasa_name, start_date, end_date, comp_type, id_name, ag_ver){
+				if(confirm('Confirm recalculate?')){
+					$("#"+id_name).html('processing');
+					$("#"+id_name).css('background-color', 'yellow');
+					$.ajax({
+						type: "POST",
+						url : "rpt_crs-action.php",
+						async	: false,
+						data :{	'start_date'	: start_date, 
+								'end_date'		: end_date,
+								'nasa_name' 	: nasa_name,
+								'comp_type' 	: comp_type,
+								'ag_ver' 		: ag_ver,
+							   	'action'		: 'recal'
+						}
+					}).done(function(result){
+						result = $.parseJSON(result); 
+						if (result == 'success'){
+							var message = 'ok';
+							var bgc = "#00cc00";
+						}else{	
+							var message = "<a style='color:blue;cursor:pointer;' onclick=recal_act('"+nasa_name+"','"+start_date+"','"+end_date+"','"+comp_type+"','"+id_name+"','"+ag_ver+"');>error</a>";
+							var bgc = "#ff0000";
+						}
+						$("#"+id_name).html(message);
+						$("#"+id_name).css('background-color', bgc);
+					});
+				}	
+			}
+		</script>
+	</head>
+	<body style="">
+		<script language="JavaScript">
+	var arr = [];
+	var managerindex = '248';
+	var moduleindex = '147';
+	var cp_filter = '["A0099","B0099","LRCM"]';
+	var duplicate_check=1;
+	function setCP(){
+		if(duplicate_check==1){
+			var cp = document.getElementById('checkpoint');
+			duplicate_check=0;
+			jQuery.ajax({
+				url: '../support/checkpoint-action.php',
+				type: "POST",
+				data: {func: "add_checkpoint", managerindex: managerindex, moduleindex: moduleindex},
+				success: function(data){
+					$("#checkpoint_status").text(data);
+					$('#checkpoint').attr("disabled", true);
+				}
+			});
+		}else{
+			alert('Please Wait action is complete')
+		}
+	}
+	
+	function companyAuto(option_value){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com'] option:selected").val();
+		var chk_tb = '';
+		//var t = $("a[id*='a_']").text();
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('A0099');
+							chk_filter.push('B0099');
+							chk_filter.push('LRCM');
+			
+
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) == '-1'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}	
+			}else{
+				cp_exist = true;
+				count--;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		/*if(cp_exist == true){
+			count = count-chk_filter.length;
+		}*/
+			
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function companySearch(){
+		var count = $("select[id*='com'] option").length; //get the length of dropdown id that contain 'com'
+		var selected_option = $("select[id*='com']").val();
+		var chk_tb ='';
+		var chk_filter = [];
+		var cp_exist = false;
+		
+							chk_filter.push('A0099');
+								chk_filter.push('B0099');
+								chk_filter.push('LRCM');
+					
+		var result = ($.inArray(selected_option, arr) > -1);
+		if($.inArray(selected_option, chk_filter) != '0'){
+			if(result == false){
+				arr.push(selected_option);
+			}
+		}
+		
+		document.getElementById('checklist').style.cssText= 'position: fixed; top: 95px; right: 0; width:100px; border: 2px solid; background-color: white;'; 
+		chk_tb += "<table width='100%'>";
+		chk_tb += "<tr><th><u>Checklist</u></th></tr>";
+		chk_tb += "<tr style='text-align: center;'><td><a href='javascript:clearsess(); '>Reset</a></td></tr>";
+		$("select[id*='com'] option").each(function(){
+			if($.inArray($(this).val(), chk_filter) != '0'){
+				if($.inArray($(this).val(),arr) != '-1'){
+					chk_tb += "<tr style='text-align: center; background-color:#00CC00;'><td>"+$(this).val()+"</td></tr>";
+				}else{
+					chk_tb += "<tr style='text-align: center;'><td>"+$(this).val()+"</td></tr>";
+				}
+			}else{
+				cp_exist = true;
+			}
+		});
+		chk_tb += "</table>";
+		document.getElementById('checklist').innerHTML=chk_tb;
+		
+		if(cp_exist == true){
+			count = count-chk_filter.length;
+		}
+		
+		if(arr.length == count){
+			$('#div_checkpoint').show();
+			$('#rowBtn').remove();
+			$('#cpTable tr:last').after('<tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"></input><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>');
+		}
+		
+	}
+	
+	function hideCheckbox(){
+		$('#checkpoint').disabled = true;
+		$('#div_checkpoint').hide();
+	}
+	
+	function showCheckbox(){
+		$('#checkpoint').disabled = false;
+		$('#div_checkpoint').show();
+	}
+
+	$(document).ready(function(){
+		$(":button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+		
+		$("#id_search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#div_checkpoint').show();
+		});
+		
+		$("#search_button").click(function(){
+			$('#checkpoint').disabled = false;
+			$('#checkpoint').show();
+		});
+	});
+	
+	$(document).bind('keydown', function(event) {
+		if( event.which === 66 ){
+			if($('#div_checkpoint').css('display')=='block'){
+				if(!$('#checkpoint').is(':disabled')){
+					setCP();	
+				}			
+			}
+		}
+
+	});
+	
+	function clearsess(){
+		jQuery.ajax({
+			url: '../support/checkpoint-action.php',
+			type: "POST",
+			data: {func: "clear_session", moduleindex: moduleindex,},
+			success: function(data){
+				window.location.reload(true);
+			}
+		});
+	}
+</script>
+<div id="checklist" style="position: fixed; top: 95px; right: 0px; width: 100px; border: 2px solid; background-color: white;"><table width="100%"><tbody><tr><th><u>Checklist</u></th></tr><tr style="text-align: center;"><td><a href="javascript:clearsess(); ">Reset</a></td></tr><tr style="text-align: center; background-color:#00CC00;"><td>RCM</td></tr></tbody></table></div>
+<div id="div_checkpoint" style="position: fixed; bottom: 0px; right: 0px; height: 50px; width: 160px; border: 2px solid; background-color: white;">
+	<table id="cpTable" style="width:100%">
+		<tbody><tr style="background-color: #0C63AF;"><th style="font-weight: bold; font-size: 14px; color:white;">Checkpoint (B)</th><th><a href="javascript:void(0);" onclick="hideCheckbox();" style="color:white;">X</a></th></tr><tr id="rowBtn"><td style="text-align: left;"><input type="button" id="checkpoint" name="checkpoint" value="Checkpoint" onclick="setCP();"><span id="checkpoint_status" style="background-color:lightgreen;"></span></td></tr>
+			</tbody></table>
+</div>
+
+
+		<br>
+		<div class="maincaption">RPT Compare CRS Tool</div>
+		<div class="search">
+			<table>
+				<tbody><tr>
+					<td><select id="com_select" onchange="search_data();companyAuto(this);"><option value="RCM">RCM</option><option value="LRCM">LRCM</option></select></td>
+					<th>Date :</th><td><select style="width: 80px" id="fr_start_date"><option value="2026-05-01" selected="">05/2026</option><option value="2026-04-01">04/2026</option><option value="2026-03-01">03/2026</option><option value="2026-02-01">02/2026</option><option value="2026-01-01">01/2026</option><option value="2025-12-01">12/2025</option><option value="2025-11-01">11/2025</option><option value="2025-10-01">10/2025</option><option value="2025-09-01">09/2025</option><option value="2025-08-01">08/2025</option><option value="2025-07-01">07/2025</option><option value="2025-06-01">06/2025</option><option value="2025-05-01">05/2025</option><option value="2025-04-01">04/2025</option><option value="2025-03-01">03/2025</option><option value="2025-02-01">02/2025</option><option value="2025-01-01">01/2025</option></select></td>
+					<th>To </th><td><select style="width: 80px" id="fr_end_date"><option value="2026-08-01" selected="">07/2026</option><option value="2026-07-01">06/2026</option><option value="2026-06-01">05/2026</option><option value="2026-05-01">04/2026</option><option value="2026-04-01">03/2026</option><option value="2026-03-01">02/2026</option><option value="2026-02-01">01/2026</option><option value="2026-01-01">12/2025</option><option value="2025-12-01">11/2025</option><option value="2025-11-01">10/2025</option><option value="2025-10-01">09/2025</option><option value="2025-09-01">08/2025</option><option value="2025-08-01">07/2025</option><option value="2025-07-01">06/2025</option><option value="2025-06-01">05/2025</option><option value="2025-05-01">04/2025</option><option value="2025-04-01">03/2025</option><option value="2025-03-01">02/2025</option><option value="2025-02-01">01/2025</option></select></td>
+					<th><a onclick="search_data();companyAuto(this);" style="color:blue;cursor:pointer;"><u>Search</u></a></th>
+				</tr>
+			</tbody></table>
+		</div>		
+		<div id="display_api" width="45%"><table class="tablelist"><tbody><tr><th>Agency</th><th colspan="2">API</th><th colspan="2">Credit</th></tr><tr><td rowspan="4">nv01</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/05/2026','31/05/2026','20260501_20260531_api_nv01','nv01')">01/05/2026 - 31/05/2026</a></td><td id="20260501_20260531_api_nv01" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','0','18/05/2026','14/06/2026','20260518_20260614_credit_nv01','nv01')">18/05/2026 - 14/06/2026</a></td><td class="20260518_20260614_credit_nv01" width="100" style="background-color: rgb(0, 204, 0);">ok</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/06/2026','30/06/2026','20260601_20260630_api_nv01','nv01')">01/06/2026 - 30/06/2026</a></td><td id="20260601_20260630_api_nv01" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','0','15/06/2026','28/06/2026','20260615_20260628_credit_nv01','nv01')">15/06/2026 - 28/06/2026</a></td><td class="20260615_20260628_credit_nv01" width="100" style="background-color: rgb(0, 204, 0);">ok</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/07/2026','31/07/2026','20260701_20260731_api_nv01','nv01')">01/07/2026 - 31/07/2026</a></td><td id="20260701_20260731_api_nv01" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','0','29/06/2026','26/07/2026','20260629_20260726_credit_nv01','nv01')">29/06/2026 - 26/07/2026</a></td><td class="20260629_20260726_credit_nv01" width="100" style="background-color: rgb(0, 204, 0);">ok</td></tr><tr><td rowspan="4">nv02</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/05/2026','31/05/2026','20260501_20260531_api_nv02','nv02')">01/05/2026 - 31/05/2026</a></td><td id="20260501_20260531_api_nv02" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td colspan="2">-</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/06/2026','30/06/2026','20260601_20260630_api_nv02','nv02')">01/06/2026 - 30/06/2026</a></td><td id="20260601_20260630_api_nv02" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td colspan="2">-</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/07/2026','31/07/2026','20260701_20260731_api_nv02','nv02')">01/07/2026 - 31/07/2026</a></td><td id="20260701_20260731_api_nv02" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td colspan="2">-</td></tr><tr><td rowspan="4">nv05</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/05/2026','31/05/2026','20260501_20260531_api_nv05','nv05')">01/05/2026 - 31/05/2026</a></td><td id="20260501_20260531_api_nv05" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','0','18/05/2026','14/06/2026','20260518_20260614_credit_nv05','nv05')">18/05/2026 - 14/06/2026</a></td><td class="20260518_20260614_credit_nv05" width="100" style="background-color: rgb(0, 204, 0);">ok</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/06/2026','30/06/2026','20260601_20260630_api_nv05','nv05')">01/06/2026 - 30/06/2026</a></td><td id="20260601_20260630_api_nv05" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','0','15/06/2026','28/06/2026','20260615_20260628_credit_nv05','nv05')">15/06/2026 - 28/06/2026</a></td><td class="20260615_20260628_credit_nv05" width="100" style="background-color: rgb(0, 204, 0);">ok</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/07/2026','31/07/2026','20260701_20260731_api_nv05','nv05')">01/07/2026 - 31/07/2026</a></td><td id="20260701_20260731_api_nv05" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','0','29/06/2026','26/07/2026','20260629_20260726_credit_nv05','nv05')">29/06/2026 - 26/07/2026</a></td><td class="20260629_20260726_credit_nv05" width="100" style="background-color: rgb(0, 204, 0);">ok</td></tr><tr><td rowspan="4">nv06</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/05/2026','31/05/2026','20260501_20260531_api_nv06','nv06')">01/05/2026 - 31/05/2026</a></td><td id="20260501_20260531_api_nv06" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td colspan="2">-</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/06/2026','30/06/2026','20260601_20260630_api_nv06','nv06')">01/06/2026 - 30/06/2026</a></td><td id="20260601_20260630_api_nv06" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td colspan="2">-</td></tr><tr><td width="200"><a href="javascript:void(0)" onclick="check_company('RCM','2','01/07/2026','31/07/2026','20260701_20260731_api_nv06','nv06')">01/07/2026 - 31/07/2026</a></td><td id="20260701_20260731_api_nv06" width="100" style="background-color: rgb(0, 204, 0);">ok</td><td colspan="2">-</td></tr></tbody></table></div><div id="display_credit" width="45%"></div><br>
+		<div class="remarksbox">
+			<span class="remark_title">Remarks:</span>
+			<ol class="remarks">
+				<li>This tool is check Agency report is correct or not. </li>
+				<li>Comparing data will take around 1 min. </li>
+				<li>If show error, click the error to recalculate.</li>
+			</ol>
+		</div>
+		<script type="text/javascript">footerCalender();  </script><br><div id="calenderS" class="calShadow"></div><div id="calender" class="calMain"><center><div id="calenderH" class="calH"><span style="position:absolute; top:1px; left:3px; font-size:12px; height:13px;">Calender</span><img src="../images/close.jpg" border="none" width="13" height="13" onmousedown="hideCalender(false)"></div><table cellpadding="0" border="0" cellspacing="5" width="100%" class="spanText"><tbody><tr align="center"><td class="calMonthYear"><img src="../images/back.jpg" border="none" width="13" height="13" onmousedown="setMonth(false)"></td><td class="calMonthYear" width="70"><span id="calender_m"></span></td><td class="calMonthYear"><img src="../images/next.jpg" border="none" width="13" height="13" onmousedown="setMonth(true)"></td><td class="calMonthYear"></td><td class="calMonthYear"><img src="../images/back.jpg" border="none" width="13" height="13" onmousedown="setYear(false)"></td><td class="calMonthYear" width="70"><span id="calender_y" class="calMonthYear"></span></td><td class="calMonthYear"><img src="../images/next.jpg" border="none" width="13" height="13" onmousedown="setYear(true)"></td></tr></tbody></table><table cellpadding="0" border="0" cellspacing="0"><tbody><tr align="center"><td><div class="calHdr">S</div></td><td><div class="calHdr">M</div></td><td><div class="calHdr">T</div></td><td><div class="calHdr">W</div></td><td><div class="calHdr">T</div></td><td><div class="calHdr">F</div></td><td><div class="calHdr">S</div></td></tr><tr align="center"><td><div id="cal1" class="calText"> </div></td><td><div id="cal2" class="calText"> </div></td><td><div id="cal3" class="calText"> </div></td><td><div id="cal4" class="calText"> </div></td><td><div id="cal5" class="calText"> </div></td><td><div id="cal6" class="calText"> </div></td><td><div id="cal7" class="calText"> </div></td></tr><tr align="center"><td><div id="cal8" class="calText"> </div></td><td><div id="cal9" class="calText"> </div></td><td><div id="cal10" class="calText"> </div></td><td><div id="cal11" class="calText"> </div></td><td><div id="cal12" class="calText"> </div></td><td><div id="cal13" class="calText"> </div></td><td><div id="cal14" class="calText"> </div></td></tr><tr align="center"><td><div id="cal15" class="calText"> </div></td><td><div id="cal16" class="calText"> </div></td><td><div id="cal17" class="calText"> </div></td><td><div id="cal18" class="calText"> </div></td><td><div id="cal19" class="calText"> </div></td><td><div id="cal20" class="calText"> </div></td><td><div id="cal21" class="calText"> </div></td></tr><tr align="center"><td><div id="cal22" class="calText"> </div></td><td><div id="cal23" class="calText"> </div></td><td><div id="cal24" class="calText"> </div></td><td><div id="cal25" class="calText"> </div></td><td><div id="cal26" class="calText"> </div></td><td><div id="cal27" class="calText"> </div></td><td><div id="cal28" class="calText"> </div></td></tr><tr align="center"><td><div id="cal29" class="calText"> </div></td><td><div id="cal30" class="calText"> </div></td><td><div id="cal31" class="calText"> </div></td><td><div id="cal32" class="calText"> </div></td><td><div id="cal33" class="calText"> </div></td><td><div id="cal34" class="calText"> </div></td><td><div id="cal35" class="calText"> </div></td></tr><tr align="center"><td><div id="cal36" class="calText"> </div></td><td><div id="cal37" class="calText"> </div></td><td><div id="cal38" class="calText"> </div></td><td><div id="cal39" class="calText"> </div></td><td><div id="cal40" class="calText"> </div></td><td><div id="cal41" class="calText"> </div></td><td><div id="cal42" class="calText"> </div></td></tr><tr><td colspan="7" align="left"><div id="calMsg" class="calMonthYear"> </div></td></tr></tbody></table></center></div>
+
+		<script>
+		 	$(document).ready(function(){
+                if(!ns4)
+                {
+                    for(i=1;i<=42;i++)calA[i]=getEl('cal'+i);
+                            cal_m=getEl("calender_m");
+                            cal_y=getEl("calender_y");
+                            cal=getEl("calender");
+                            calMsg=getEl("calMsg")
+                            calS=getEl("calenderS");
+                            calH=getEl("calenderH");
+                            calH.onmousedown=calDragInit;
+                            calH.onmouseup=function(){calDrag=false;}
+                            if(ns6)setInterval('calMoveNS6()',50);
+                }
+                search_data();
+				companyAuto(this);;
+            });
+		</script>
+	
+
+</body></html>

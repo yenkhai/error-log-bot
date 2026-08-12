@@ -1,0 +1,242 @@
+<html><head>
+	<title id="title">Robot Monitor</title>
+	<link href="../system_tool/css/om.css?v=1" rel="stylesheet" type="text/css">
+        <script language="JavaScript" src="libs/jquery-1.3.1.min.js"></script>
+        <script>		
+	    var tablecolumn = ["80","300","150"];
+	    var cdId='';
+            $(document).ready(function(){
+				var defaultRefresh = '3';
+                 $('#countdown').html(defaultRefresh);
+                callRefresh(defaultRefresh);
+            });
+        </script>
+	<style>
+		body{background-color:#efefef;font-family:arial;font-size:12px;font-weight:normal;}
+		#nav{padding:0;}
+		#divFunc ul{list-style:none;} #divFunc ul>li{display:inline;}
+		#pagetitle{border:1px solid #000;background-color:#fff;padding:3px 5px 3px 5px;margin-right:10px;}
+		#divFunc a{border:1px solid #000;padding:3px 5px 3px 5px;}
+		#divFunc select{padding:3px 5px 3px 5px;}
+		.om{ background-color:#000066; }
+		.om tr{ background-color:#ffffff; }
+		.om th{ background-color:#599FFF; padding:3px; color:black }
+		.om td{ padding: 3px; vertical-align:top;}
+		.om .mid{text-align:center;}
+		.href{border:0px;background:transparent;cursor:pointer;color:blue;}
+		@media only screen and (max-width: 1170px) {
+ 		  #iplist{margin-top:10px;}
+		  #spinload{margin-top:10px;}
+		}
+	</style></head>
+	
+<body>
+ <div id="divFunc">
+    <ul id="nav">
+   	<li style="white-space: nowrap;width:auto"><label id="pagetitle">Robot Monitor</label></li>
+        <li>
+		<a href="javascript:void(1)" onclick="callRefresh(-1)" title="Refresh" style="display:inner">Refresh (<font id="countdown">3</font>)</a>
+		</li>
+      	<li style="padding:0 10px 0 10px; width:auto">          
+                <select onchange="callRefresh(this.value)" id="timerList" style="border-color:#000;">
+                 <option value="0">Stop</option><option value="3" selected="">3</option><option value="5">5</option><option value="10">10</option><option value="20">20</option><option value="35">35</option><option value="60">60</option><option value="180">180</option>                </select>
+        </li>
+        <li style="width:auto;">
+		Sound Alert <input type="CHECKBOX" id="alertSound" checked="">
+        </li>
+  </ul>
+ 
+ </div>
+	<div>
+		<div id="robotlist" style="margin:0 20px 10px 0;float:left;"><table class="om" cellspacing="1"><colgroup><col width="80"><col width="300"><col width="150"></colgroup><tbody><tr><th>Robot ID</th><th>Details</th><th>TimeStamp<br>(2026-07-27 04:10:43)</th></tr><tr><td class="mid">998</td><td>Nv06 live download event redis</td><td class="mid" bgcolor="#4FFF33">2026-07-27 04:10:32</td></tr><tr><td class="mid">999</td><td>Nv06 download live channel robot</td><td class="mid" bgcolor="#4FFF33">2026-07-27 04:10:32</td></tr></tbody></table></div>
+		<div id="iplist" style="margin:0 5px 10px 0;float:left;"><table cellspacing="1" cellpadding="1" class="om" style="text-align:center"><colgroup><col width="250"><col width="100"><col width="100"><col width="100"></colgroup><tbody><tr><th>IP Address</th><th colspan="3">Actions</th></tr><tr><td bgcolor="#00ff00">10.101.10.49 (Live Channel)</td><td><button onclick="action('10.101.10.49','s');" class="href">Start </button></td><td><button onclick="action('10.101.10.49','e');" class="href">Stop </button></td><td><button onclick="action('10.101.10.49','d');" class="href">Clear Log </button></td></tr><tr><td bgcolor="#00ff00">10.101.10.59 (Tq001 Robot)</td><td><button onclick="action('10.101.10.59','s');" class="href">Start </button></td><td><button onclick="action('10.101.10.59','e');" class="href">Stop </button></td><td><button onclick="action('10.101.10.59','d');" class="href">Clear Log </button></td></tr></tbody></table></div>
+		<div id="spinload" style="float:left;">
+			<img src="images/loading.gif" height="20" width="20" id="loading" style="display:none;">
+		</div>
+	</div>
+<div class="remarksbox">
+        <span class="remark_title">Remarks:</span>
+        <ol class="remarks">
+		<li>If robot red/die direct call developer</li>
+                <li>Click "Clear Log" button to clear space. If still 70% only call developer</li>
+        </ol>
+</div>
+
+
+
+<script type="text/javascript">
+var validuser = 1;
+function eid(id) {
+	return(document.getElementById(id));
+}
+
+function action(i,a){
+	document.getElementById('loading').style.display = "block";
+	$('.href').attr('disabled','disabled');
+	$('.href').css('cursor','wait');
+	$('#countdown').text(0);
+        var vstart= $('#timerList :selected').val();
+        $('#timerList :selected').val(0);
+	$.get('robot_monitoring.php',{
+		action:a,
+		ip:i
+	},function(data){
+		var data = JSON.parse(data);
+		if(data.msg != null){
+			if(data.msg === 'rmok' || data.msg === 'eok' || data.msg === 'sok')
+				alert('Success');
+			else if(data.msg.indexOf('timed out') != -1){
+				if(a == 's' || a == 'e')
+					alert('Success');
+				else if(a == 'd')
+					alert('Log cleared. Timeout detected. Please check AP Space');
+			}else
+				alert('Fail');
+
+				ajax_match_monitor();
+				$('#countdown').text(vstart);
+                                $('#timerList :selected').val(vstart);
+                                countdown();
+		}
+	});
+}
+
+function ajax_match_monitor(){
+		$.get('robot_monitoring.php',{
+			action:'select'
+		},function(data){
+			var data = JSON.parse(data);
+			var str = [];
+			str.push('<table class="om" cellspacing="1">');
+			str.push('<colgroup>');
+			$.each(tablecolumn,function(t,tobj){ 
+				str.push('<col width="'+tobj+'">');
+			});
+			str.push('</colgroup>');
+			str.push('<tr><th>Robot ID</th><th>Details</th><th>TimeStamp<br>('+data.now+')</th></tr>');
+			var color = '';
+			$.each(data.cache,function(i,iobj){
+				var color = (iobj.expire != "1")? "#FF0000" : "#4FFF33";
+				str.push('<tr><td class="mid">'+i+'</td><td>'+iobj.details+'</td><td class="mid" bgcolor="'+color+'">'+iobj.date+'</td></tr>');	
+			});
+			str.push('</table>');
+			$('#robotlist').html(str.join(''));
+			var tableth = ['250','100','100','100'];
+			
+		if(validuser){
+                        var str = [];
+                        str.push('<table cellspacing="1" cellpadding="1" class="om" style="text-align:center">');
+                        str.push('<colgroup>');
+                        for(i in tableth){
+                                str.push('<col width="'+tableth[i]+'">');
+                        }
+                        str.push('</colgroup>');
+                        str.push('<th>IP Address</th><th colspan="3">Actions</th>');
+                        $.each(data.IP,function(i,iobj){
+                                var name = data.name[i].replace("_", " ");
+                                name = name.replace(/\b\w/g, function(char) {
+                                        return char.toUpperCase();
+                                });
+                                if(iobj == "OFF")
+                                        var color = "#ff0000";
+                                else
+                                        var color = "#00ff00";
+				str.push('<tr><td bgcolor="'+color+'">'+i+' ('+name+')'+'</td>');
+				if(i!='10.16.250.12'){
+                                	str.push('<td><button onclick="action(\''+i+'\',\'s\');" class="href">Start </button></td>');
+                                	str.push('<td><button onclick="action(\''+i+'\',\'e\');" class="href">Stop </button></td>');
+					str.push('<td><button onclick="action(\''+i+'\',\'d\');" class="href">Clear Log </button></td></tr>');
+				}else{
+					 str.push('<td colspan=3>If need open go edit file</td>');
+				}
+                        });
+                        str.push('</table>');
+                        $("#iplist").html(str.join(''));
+                }	
+			check_alert(data.alert);
+		});
+	document.getElementById('loading').style.display = "none";
+}
+
+var blink_flag = true;
+var blink_interval = '';
+
+function blink() {
+	if(blink_flag){
+		document.title = '<<Alert>> Robot Monitor';
+		blink_flag = false;
+	} else {
+		document.title = 'Robot Monitor';
+		blink_flag = true;
+	}
+}
+
+function start_blink() {
+	stop_blink();
+	blink_interval = setInterval("blink()",500);
+}
+
+function stop_blink() {
+	clearInterval(blink_interval);
+}
+
+function check_alert(alert) {
+	if(alert) {
+		start_blink();
+		if($('#alertSound').is(":checked")){playsound();}
+	} else {
+		stop_blink();
+		blink_flag = false;
+		blink();
+	}
+}
+		
+function playsound(){
+	var audio = new Audio('sound/monitor_alarm.wav');
+	audio.play();
+}
+function change(value){
+	var vstart= $('#timerList :selected').val();
+	$('#countdown').text(vstart);
+	ajax_match_monitor();
+}
+
+ function countdown(){
+     var vstart= $('#timerList :selected').val();
+
+     if(vstart!='0'){
+         var cval = $('#countdown').text();
+         if($('#countdown').text()<=1){
+             $('#countdown').text(vstart);
+         }else{
+             $('#countdown').text((cval-1));
+         }
+
+         if(cval<='1'){
+            ajax_match_monitor();
+         }                    
+         cdId=setTimeout('countdown()',1000);
+     }else{
+
+         if(cdId!=''){
+            clearTimeout(cdId);
+         }
+     }
+ }
+
+function callRefresh(r){
+    if(cdId!=''){
+       clearTimeout(cdId);
+    }
+
+    var vstart= $('#timerList :selected').val();
+    if(r!='0' || r=='-1'){
+        $('#countdown').text(vstart);
+        ajax_match_monitor();
+		countdown();
+    }else{
+        $('#countdown').text(r);
+    }
+}
+</script>
+</body></html>
