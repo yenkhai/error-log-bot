@@ -146,3 +146,14 @@ class UnifiedBotApp(ctk.CTk):
     def get_login_url(self):
         """[对外提供接口] 返回当前顶栏界面填写的 URL 域名链接"""
         return self.entry_url.get().strip()
+
+    def notify_task_state_changed(self):
+        """
+        [全局双向排他互斥锁通知]
+        当任何一个 Tab 启动或结束任务时，通知所有 Tab 刷新自身按钮的 Enable/Disable 状态，
+        确保 Checkpoint 巡检与 Error Log 导出永远不会并发运行！
+        """
+        if hasattr(self, 'checkpoint_tab'):
+            self.checkpoint_tab.update_button_states()
+        if hasattr(self, 'error_log_tab'):
+            self.error_log_tab.update_button_states()

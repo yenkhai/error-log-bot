@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-08-13 07:36:20",
+  "timestamp_raw": 1786577780.8267758,
+  "station_id": "apy_b0i19text",
+  "station_name": "第01站 Copier",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【Copier 全量巡检数据明细】:",
+    "--- [1. Copier Monitor 子窗口板块 (共 20 家公司)] ---",
+    "   * D0005 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * D0008 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * D0009 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * D0011 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * D0012 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * D0013 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:05 [OK/正常]",
+    "   * D0015 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:09 [OK/正常]",
+    "   * P0001 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:09 [OK/正常]",
+    "   * P0002 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:09 [OK/正常]",
+    "   * P0003 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:05 [OK/正常]",
+    "   * P0005 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:07 [OK/正常]",
+    "   * P0008 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * E1001 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:06 [OK/正常]",
+    "   * E1002 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:09 [OK/正常]",
+    "   * E2001 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * E2002 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:07 [OK/正常]",
+    "   * E2003 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]",
+    "   * J0001 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:09 [OK/正常]",
+    "   * J0002 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:06 [OK/正常]",
+    "   * K0002 - Sport: Total Unsynch (Niw_w=0, Niw_winc=0, Niw_wmulp=0), Last Update=2026-08-12 19:36:08 [OK/正常]"
+  ],
+  "table_data": {}
+}

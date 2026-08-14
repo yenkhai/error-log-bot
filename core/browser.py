@@ -1,4 +1,17 @@
+"""
+================================================================================
+[浏览器驱动管理器] (core/browser.py)
+--------------------------------------------------------------------------------
+作用:
+1. 优先秒级自动接管/连接已打开的 Checkpoint 浏览器 (CDP 端口 127.0.0.1:9222)。
+2. 若未启动 9222 浏览器，则自动退回到启动全新的 Chrome 全屏实例。
+3. 自动完成 Basic Auth 与静默登录表单提交。
+4. 全局复用 Driver 句柄，避免重复打开窗口。
+================================================================================
+"""
+
 import time
+import urllib.request
 from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -6,18 +19,20 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from config import load_config
 
+
 class BrowserManager:
-    """
-    ================================================================================
-    [浏览器驱动管理器] (BrowserManager - 标准自动巡检版)
-    --------------------------------------------------------------------------------
-    作用:
-    1. 负责自动启动全屏 Chrome 巡检实例，并导航至目标系统登录页。
-    2. 自动进行账号密码静默填充与提交，保证巡检全自动化高效运行。
-    3. 支持单例模式，同一巡检生命周期内复用 Driver 实例。
-    ================================================================================
-    """
     _driver = None
+
+    @classmethod
+    def is_cdp_active(cls, port=9222) -> bool:
+        """测试本地 127.0.0.1:{port} 调试接口是否开放且存活"""
+        try:
+            url = f"http://127.0.0.1:{port}/json/version"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=1.0) as res:
+                return res.status == 200
+        except Exception:
+            return False
 
     @classmethod
     def get_driver(cls, url=None, user=None, pwd=None):
@@ -35,11 +50,26 @@ class BrowserManager:
             except Exception:
                 cls._driver = None
 
-        # 2. 启动标准的 Chrome 巡检实例
+        # 2. 探针检测：若用户已开启 9222 Checkpoint 浏览器，秒级无缝接管！
+        if cls.is_cdp_active(9222):
+            try:
+                cdp_options = Options()
+                cdp_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+                if service:
+                    cls._driver = webdriver.Chrome(service=service, options=cdp_options)
+                else:
+                    cls._driver = webdriver.Chrome(options=cdp_options)
+                
+                # 接管成功，直接返回已有浏览器实例
+                return cls._driver
+            except Exception:
+                cls._driver = None
+
+        # 3. 后备方案：若未开启 9222 浏览器，启动全新的 Chrome 实例
         std_options = Options()
         std_options.add_argument("--start-maximized")
         std_options.add_argument("--disable-popup-blocking")
-        
+
         try:
             if service:
                 cls._driver = webdriver.Chrome(service=service, options=std_options)
@@ -60,7 +90,7 @@ class BrowserManager:
             cls.auto_fill_login(cls._driver, user, pwd)
             return cls._driver
         except Exception as err:
-            raise Exception(f"启动 Chrome 浏览器失败！详细信息: {err}")
+            raise Exception(f"连接或启动 Chrome 浏览器失败！详细信息: {err}")
 
     @classmethod
     def auto_fill_login(cls, driver, user=None, pwd=None):
@@ -70,17 +100,17 @@ class BrowserManager:
 
         try:
             driver.switch_to.default_content()
-            
+
             user_inputs = (
-                driver.find_elements(By.ID, "id_username") or 
-                driver.find_elements(By.NAME, "fr_username") or 
-                driver.find_elements(By.NAME, "fr_user") or 
+                driver.find_elements(By.ID, "id_username") or
+                driver.find_elements(By.NAME, "fr_username") or
+                driver.find_elements(By.NAME, "fr_user") or
                 driver.find_elements(By.XPATH, "//input[@type='text']")
             )
 
             pass_inputs = (
-                driver.find_elements(By.NAME, "fr_password") or 
-                driver.find_elements(By.ID, "fr_password") or 
+                driver.find_elements(By.NAME, "fr_password") or
+                driver.find_elements(By.ID, "fr_password") or
                 driver.find_elements(By.XPATH, "//input[@type='password']")
             )
 
@@ -94,9 +124,9 @@ class BrowserManager:
                 p_el.send_keys(pwd)
 
                 submits = (
-                    driver.find_elements(By.ID, "id_save_button") or 
-                    driver.find_elements(By.XPATH, "//a[contains(@onclick, 'button_login') or contains(@class, 'submit')]") or 
-                    driver.find_elements(By.XPATH, "//a[contains(text(), 'Login') or contains(text(), '登入')]") or 
+                    driver.find_elements(By.ID, "id_save_button") or
+                    driver.find_elements(By.XPATH, "//a[contains(@onclick, 'button_login') or contains(@class, 'submit')]") or
+                    driver.find_elements(By.XPATH, "//a[contains(text(), 'Login') or contains(text(), '登入')]") or
                     driver.find_elements(By.XPATH, "//input[@type='submit']")
                 )
 

@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-08-13 13:12:09",
+  "timestamp_raw": 1786597929.0254126,
+  "station_id": "apy_b0i8text",
+  "station_name": "第7站 RPT Compare",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【RPT Compare 全量巡检数据明细 (RCM)】:",
+    "   * [1. 状态栏 (Tier 1)]: Rpt Complete = Rpt Complete | Reset Log = 0 [OK/正常]",
+    "   * [2. 主对比矩阵 (Tier 1)]: 成功校验 26 个 Satellite 卫星节点，包含 936 个 'ok' 绿底单元格 [OK/正常]"
+  ],
+  "table_data": {}
+}

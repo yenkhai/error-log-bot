@@ -73,11 +73,11 @@ class CalculateBetslipsChecker(BaseChecker):
                     if (typeof callCalcuate === "function") callCalcuate(1);
                 """, comp_idx)
 
-                # 3.2 显式 Python visual sleep，确保 Chrome 完成 UI 视觉渲染重绘与 AJAX 响应
-                time.sleep(10)
+                # 3.2 动态智能轮询：等待当前公司的 Loading 动画消失与数据计算渲染完毕
+                self.wait_for_page_loaded(seconds=0.5, max_wait=15)
 
                 # 3.3 提取当前公司的数据 (包含 ui-datepicker 日历表隔离防护)
-                comp_data = self.driver.execute_script("""
+                comp_data = self.driver.execute_script(r"""
                     var targetVal = arguments[0];
                     var targetText = arguments[1];
                     var result = {

@@ -1,239 +1,512 @@
 """
 ================================================================================
-巡检报告与 HTML 仪表盘管理器 (core/report_manager.py)
+HTML 仪表盘管理器 (core/report_manager.py)
 --------------------------------------------------------------------------------
+数据来源: Desktop\\CheckpointLogs\\{niw,copier}\\*.txt  (page_logger.py 写入)
+
 功能:
-1. 保留原本控制台与 Bot 日志的文本输出不受任何影响。
-2. 每一个 Checkpoint 关卡将数据存入 `logs/checkpoint_history/` 中。
-3. 【自动清理】：超过 24 小时 (1 天) 的关卡历史数据自动物理删除。
-4. 【HTML 仪表盘生成】：读取 24 小时内的所有关卡数据，生成高保真 CSS 样式的
-   `reports/dashboard.html` 网页。
-   - 绿底 (#00CC00 / #28a745) 表示 OK/正常；
-   - 红底 (#FF0000 / #dc3545) 表示 Tier 1 报错阻断；
-   - 黄底 (#FFCC00 / #ffc107) 表示 Tier 3 提醒；
-   - 尽量 100% 还原后台原始表格视觉感观。
+1. 读取所有页面的 .txt 日志文件中每一条历史记录 (全量，非仅最新)
+2. 每个关卡显示完整的历史 Timeline — 按时间倒序排列，每次 Checkpoint 一条
+3. ASCII 表格数据直接转换成 HTML 彩色表格 (OK=绿/FAILED=红/WARN=黄)
+4. 生成 reports/dashboard.html 并在浏览器中打开
 ================================================================================
 """
 
 import os
-import json
 import time
-import glob
 import webbrowser
+from datetime import datetime
+from core.page_logger import LOG_ROOT, PAGE_LOG_META, PageLogger, RECORD_SEPARATOR
+
+_PROJ_ROOT = os.path.dirname(os.path.dirname(__file__))
+DASHBOARD_FILE = os.path.join(_PROJ_ROOT, "reports", "dashboard.html")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 解析单个 .txt 文件（每文件一条记录）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_single_file(txt_path: str) -> dict | None:
+    """
+    解析单个 checkpoint .txt 文件（每文件刚好一条记录）。
+    返回 dict: timestamp, timestamp_str, station_name, is_success, ascii_lines, raw_lines
+    """
+    if not os.path.exists(txt_path):
+        return None
+
+    with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
+        content = f.read()
+
+    if not content.strip():
+        return None
+
+    # 常加内容可能包含旧式 RECORD_SEPARATOR，简单去除即可
+    content = content.replace(RECORD_SEPARATOR, "")
+    lines = content.splitlines()
+
+    # 提取关键字段
+    timestamp_str = ""
+    is_success = True
+    station_name = ""
+    for line in lines:
+        if "巡检时间:" in line:
+            timestamp_str = line.replace("巡检时间:", "").strip()
+        if "结果" in line and ("SUCCESS" in line or "FAILED" in line):
+            is_success = "SUCCESS" in line
+        if "页面站点:" in line:
+            station_name = line.replace("页面站点:", "").strip()
+
+    # 如果内容里没有时间，从文件名提取
+    if not timestamp_str:
+        try:
+            basename = os.path.basename(txt_path).replace(".txt", "")
+            # 格式: prefix_YYYYMMDD_HHMMSS 或 prefix_YYYYMMDD_HHMM
+            parts = basename.rsplit("_", 2)
+            ts_raw = parts[-2] + "_" + parts[-1]
+            try:
+                dt = datetime.strptime(ts_raw, "%Y%m%d_%H%M%S")
+            except ValueError:
+                dt = datetime.strptime(ts_raw, "%Y%m%d_%H%M")
+            timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, IndexError):
+            timestamp_str = ""
+
+    try:
+        timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            timestamp = datetime.min
+
+    # ASCII 表格行
+    ascii_chars = set("┌┐└┘├┼┤─│┬┴")
+    ascii_lines = [ln for ln in lines if any(c in ln for c in ascii_chars)]
+
+    # 原始日志行
+    raw_lines = []
+    in_raw = False
+    for line in lines:
+        if "--- 原始日志 ---" in line:
+            in_raw = True
+            continue
+        if in_raw:
+            stripped = line.strip()
+            if stripped and all(c == "─" for c in stripped) and len(stripped) > 5:
+                break
+            raw_lines.append(line)
+
+    return {
+        "timestamp":     timestamp,
+        "timestamp_str": timestamp_str,
+        "station_name":  station_name,
+        "is_success":    is_success,
+        "ascii_lines":   ascii_lines,
+        "raw_lines":     raw_lines,
+        "filename":      os.path.basename(txt_path),
+    }
+
+
+def _parse_all_records(page_key: str) -> list:
+    """
+    读取某个 page_key 下所有独立 .txt 文件，返回全量历史记录列表。
+    已按时间降序排列（最新在最前）。
+    """
+    files = PageLogger.get_page_log_files(page_key)   # 已降序排列
+    records = []
+    for fp in files:
+        rec = _parse_single_file(fp)
+        if rec:
+            records.append(rec)
+    return records
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ASCII 表格 → HTML <table> (完整显示，不截断)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ascii_table_to_html(ascii_lines: list) -> str:
+    """把 ASCII 边框表格行转成完整的 HTML <table>（含行颜色语义）"""
+    if not ascii_lines:
+        return ""
+
+    data_lines = [ln for ln in ascii_lines if "│" in ln]
+    if not data_lines:
+        return ""
+
+    def parse_row(line: str) -> list:
+        parts = line.split("│")
+        return [p.strip() for p in parts if p != ""]
+
+    def row_class(row: list) -> str:
+        text = " ".join(row).upper()
+        if any(k in text for k in ["ERROR", "TIER 1", "TIER1", "FAILED", "❌", "[ERROR"]):
+            return "row-err"
+        if any(k in text for k in ["WARN", "TIER 3", "TIER3", "提醒", "[WARN"]):
+            return "row-warn"
+        if any(k in text for k in ["OK/", "SUCCESS", "正常", "NO ERROR", "✅", "[OK"]):
+            return "row-ok"
+        return ""
+
+    rows = [parse_row(ln) for ln in data_lines]
+    if not rows:
+        return ""
+
+    # 过滤掉空行 (有时 ASCII 分隔线混入)
+    rows = [r for r in rows if any(cell.strip() for cell in r)]
+    if not rows:
+        return ""
+
+    header_row = rows[0]
+    body_rows  = rows[1:]
+
+    thead = "<thead><tr>" + "".join(
+        f"<th>{h}</th>" for h in header_row
+    ) + "</tr></thead>"
+
+    tbody_html = ""
+    for row in body_rows:
+        cls = row_class(row)
+        tds = "".join(f"<td>{cell}</td>" for cell in row)
+        tbody_html += f'<tr class="{cls}">{tds}</tr>\n'
+
+    return f'<div class="table-scroll"><table class="data-table"><colgroup>' + \
+           "".join("<col>" for _ in header_row) + \
+           f"</colgroup>{thead}<tbody>{tbody_html}</tbody></table></div>"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 原始日志行 → HTML
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _raw_lines_to_html(raw_lines: list) -> str:
+    """把原始日志行转成带颜色的 <pre> 块，内容完整不截断"""
+    if not raw_lines:
+        return ""
+
+    items = []
+    for line in raw_lines:
+        if not line.strip():
+            items.append("<br>")
+            continue
+        u = line.upper()
+        if any(k in u for k in ["[ERROR]", "FAILED", "TIER 1", "TIER1", "致命", "阻断", "❌"]):
+            cls = "log-err"
+        elif any(k in u for k in ["SUCCESS", "通关", "✅", "巡检通过", "CHECK RESULT] SUCCESS"]):
+            cls = "log-ok"
+        elif any(k in u for k in ["[WARN]", "TIER 3", "TIER3", "提醒", "WARNING", "[NOTICE]"]):
+            cls = "log-warn"
+        elif any(k in u for k in ["CHECKPOINT", "打勾"]):
+            cls = "log-ckpt"
+        elif any(k in u for k in ["[STATION]", "[PIPELINE", "════"]):
+            cls = "log-station"
+        else:
+            cls = "log-info"
+
+        escaped = (line
+                   .replace("&", "&amp;")
+                   .replace("<", "&lt;")
+                   .replace(">", "&gt;"))
+        items.append(f'<div class="log-line {cls}">{escaped}</div>')
+
+    return "\n".join(items)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 构建单次 Checkpoint 记录块 HTML
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_record_block(rec: dict, idx: int, is_latest: bool) -> str:
+    """
+    生成单次巡检记录的可折叠块 HTML。
+    idx=0 (最新的) 默认展开；其余默认折叠。
+    """
+    ts      = rec["timestamp_str"]
+    ok      = rec["is_success"]
+    badge   = "✅ PASS" if ok else "❌ FAILED"
+    badge_c = "badge-ok" if ok else "badge-err"
+    bg_c    = "rec-ok" if ok else "rec-err"
+    uid     = f"rec_{id(rec)}_{idx}"  # 唯一 ID 给 details/summary 用
+
+    table_html = _ascii_table_to_html(rec["ascii_lines"])
+    log_html   = _raw_lines_to_html(rec["raw_lines"])
+
+    body_parts = []
+    if table_html:
+        body_parts.append(f'<div class="section-label">📋 数据明细表</div>{table_html}')
+    if log_html:
+        body_parts.append(
+            f'<div class="section-label">📝 原始日志</div>'
+            f'<div class="log-wrap">{log_html}</div>'
+        )
+    if not body_parts:
+        body_parts.append('<div class="log-info-dim">此次记录无详细数据</div>')
+
+    body_html = "\n".join(body_parts)
+    open_attr = " open" if is_latest else ""
+
+    return f"""
+    <details class="record-block {bg_c}"{open_attr}>
+      <summary class="rec-summary">
+        <span class="rec-ts">🕐 {ts}</span>
+        <span class="badge {badge_c}">{badge}</span>
+        {"<span class='latest-tag'>最新</span>" if is_latest else ""}
+      </summary>
+      <div class="rec-body">
+        {body_html}
+      </div>
+    </details>"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 构建单个关卡 card HTML (含所有历史记录)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_station_card(key: str, records: list) -> str:
+    """生成单个关卡的 HTML card，含全量历史 Timeline"""
+    if not records:
+        label = key.replace("niw_", "NIW #").replace("copier_", "Copier #")
+        return f"""
+    <div class="station-card no-data">
+      <div class="card-header dim">
+        <span class="station-name">{label}</span>
+        <span class="badge badge-none">暂无记录</span>
+      </div>
+      <div class="card-body"><p class="no-data-msg">尚未执行过巡检</p></div>
+    </div>"""
+
+    latest  = records[0]
+    name    = latest["station_name"] or key
+    ok      = latest["is_success"]
+    count   = len(records)
+    hdr_c   = "header-ok" if ok else "header-err"
+    badge_c = "badge-ok"  if ok else "badge-err"
+    badge_t = "✅ PASS"    if ok else "❌ FAILED"
+
+    records_html = "\n".join(
+        _build_record_block(rec, i, i == 0)
+        for i, rec in enumerate(records)
+    )
+
+    return f"""
+    <div class="station-card">
+      <div class="card-header {hdr_c}">
+        <span class="station-name">{name}</span>
+        <div class="card-meta">
+          <span class="rec-count">共 {count} 次记录</span>
+          <span class="badge {badge_c}">{badge_t} (最新)</span>
+        </div>
+      </div>
+      <div class="card-body">
+        {records_html}
+      </div>
+    </div>"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ReportManager 公开接口
+# ─────────────────────────────────────────────────────────────────────────────
 
 class ReportManager:
-    HISTORY_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "checkpoint_history")
-    REPORT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "reports")
-    DASHBOARD_FILE = os.path.join(REPORT_DIR, "dashboard.html")
-
-    @classmethod
-    def ensure_dirs(cls):
-        """确保日志与报告目录存在"""
-        os.makedirs(cls.HISTORY_DIR, exist_ok=True)
-        os.makedirs(cls.REPORT_DIR, exist_ok=True)
-
-    @classmethod
-    def cleanup_old_data(cls, max_hours: float = 24.0):
-        """超过一天 (24 小时) 的 Checkpoint 历史文件自动物理删除"""
-        cls.ensure_dirs()
-        now = time.time()
-        cutoff = now - (max_hours * 3600)
-
-        for filepath in glob.glob(os.path.join(cls.HISTORY_DIR, "*.json")):
-            try:
-                file_mtime = os.path.getmtime(filepath)
-                if file_mtime < cutoff:
-                    os.remove(filepath)
-            except Exception:
-                pass
-
-    @classmethod
-    def save_checkpoint(cls, station_id: str, station_name: str, status: str, summary_list: list, table_data: dict = None):
-        """
-        保存单个 Checkpoint 关卡的数据
-        station_id: 如 "page_07"
-        station_name: 如 "第7站 RPT Compare"
-        status: "SUCCESS" | "FAILED" | "WARNING"
-        summary_list: 日志摘要文本列表
-        table_data: 结构化表格字典对象 (包含单元格与颜色高亮)
-        """
-        cls.ensure_dirs()
-        cls.cleanup_old_data(max_hours=24.0)
-
-        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp_str}_{station_id}.json"
-        filepath = os.path.join(cls.HISTORY_DIR, filename)
-
-        data_payload = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "timestamp_raw": time.time(),
-            "station_id": station_id,
-            "station_name": station_name,
-            "status": status,
-            "summary_list": summary_list,
-            "table_data": table_data or {}
-        }
-
-        try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(data_payload, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-        # 每次保存后增量重新构建 HTML 仪表盘
-        cls.generate_html_dashboard()
+    DASHBOARD_FILE = DASHBOARD_FILE
 
     @classmethod
     def generate_html_dashboard(cls):
-        """读取 24 小时内的全量 Checkpoint 历史，重新渲染 dashboard.html"""
-        cls.ensure_dirs()
-        cls.cleanup_old_data(max_hours=24.0)
+        """Scan all per-checkpoint .txt files via PageLogger, build dashboard.html"""
+        os.makedirs(os.path.dirname(cls.DASHBOARD_FILE), exist_ok=True)
 
-        files = glob.glob(os.path.join(cls.HISTORY_DIR, "*.json"))
-        records = []
+        NIW_KEYS    = [f"niw_{str(i+1).zfill(2)}"    for i in range(15)]
+        COPIER_KEYS = [f"copier_{str(i+1).zfill(2)}" for i in range(9)]
 
-        for fp in files:
-            try:
-                with open(fp, "r", encoding="utf-8") as f:
-                    rec = json.load(f)
-                    records.append(rec)
-            except Exception:
-                pass
+        niw_data    = [(k, _parse_all_records(k)) for k in NIW_KEYS]
+        copier_data = [(k, _parse_all_records(k)) for k in COPIER_KEYS]
 
-        # 按时间倒序或正序排列
-        records.sort(key=lambda x: x.get("timestamp_raw", 0))
-
-        html_content = cls._build_html_str(records)
-
-        try:
-            with open(cls.DASHBOARD_FILE, "w", encoding="utf-8") as f:
-                f.write(html_content)
-        except Exception:
-            pass
+        html = cls._build_html(niw_data, copier_data)
+        with open(cls.DASHBOARD_FILE, "w", encoding="utf-8") as f:
+            f.write(html)
 
     @classmethod
     def open_dashboard(cls):
-        """在默认浏览器中打开 HTML 仪表盘"""
         cls.generate_html_dashboard()
         if os.path.exists(cls.DASHBOARD_FILE):
             webbrowser.open(f"file:///{os.path.abspath(cls.DASHBOARD_FILE)}")
 
     @classmethod
-    def _build_html_str(cls, records: list) -> str:
-        """构建高保真真实后台 UI 风格的 HTML 报告"""
+    def _build_html(cls, niw_data: list, copier_data: list) -> str:
         now_str = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        stations_html = ""
-        for rec in records:
-            st_name = rec.get("station_name", "未知关卡")
-            st_time = rec.get("timestamp", "")
-            st_status = rec.get("status", "SUCCESS")
-            summaries = rec.get("summary_list", [])
+        all_data  = niw_data + copier_data
+        total     = len(all_data)
+        passed    = sum(1 for _, recs in all_data if recs and recs[0]["is_success"])
+        failed    = sum(1 for _, recs in all_data if recs and not recs[0]["is_success"])
+        no_data   = sum(1 for _, recs in all_data if not recs)
+        total_runs = sum(len(recs) for _, recs in all_data)
 
-            status_badge = '<span class="badge bg-success">PASS / 合格</span>'
-            if st_status == "FAILED":
-                status_badge = '<span class="badge bg-danger">Tier 1 报错阻断</span>'
-            elif st_status == "WARNING":
-                status_badge = '<span class="badge bg-warning text-dark">Tier 3 通报提醒</span>'
+        niw_html    = "\n".join(_build_station_card(k, r) for k, r in niw_data)
+        copier_html = "\n".join(_build_station_card(k, r) for k, r in copier_data)
 
-            summary_rows = ""
-            for s in summaries:
-                row_style = ""
-                if "Tier 1" in s or "ERROR" in s:
-                    row_style = 'style="background-color: #ffe6e6; color: #cc0000; font-weight: bold;"'
-                elif "Tier 3" in s or "Pending" in s:
-                    row_style = 'style="background-color: #fff9e6; color: #b38f00; font-weight: bold;"'
-                elif "OK" in s or "正常" in s or "ok" in s:
-                    row_style = 'style="background-color: #e6ffe6; color: #008000;"'
-
-                summary_rows += f'<tr {row_style}><td style="padding: 6px 12px;">{s}</td></tr>\n'
-
-            stations_html += f"""
-            <div class="card mb-4 shadow-sm border-0">
-                <div class="card-header d-flex justify-content-between align-items-center" style="background-color: #0C63AF; color: white; font-weight: bold;">
-                    <span><i class="bi bi-shield-check me-2"></i>{st_name}</span>
-                    <div>
-                        <span class="me-3" style="font-size: 0.85rem; opacity: 0.9;">{st_time}</span>
-                        {status_badge}
-                    </div>
-                </div>
-                <div class="card-body p-0">
-                    <table class="table table-bordered table-sm mb-0">
-                        <tbody>
-                            {summary_rows if summary_rows else '<tr><td class="text-muted p-3">无详细明细记录</td></tr>'}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            """
-
-        full_html = f"""<!DOCTYPE html>
+        return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NIW 关卡巡检实时仪表盘 (Google Sheet 视觉对齐版)</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {{
-            background-color: #f4f6f9;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            color: #333;
-        }}
-        .table-bg-ok {{ background-color: #00CC00 !important; color: #ffffff; font-weight: bold; text-align: center; }}
-        .table-bg-err {{ background-color: #FF0000 !important; color: #ffffff; font-weight: bold; text-align: center; }}
-        .table-bg-warn {{ background-color: #FFCC00 !important; color: #000000; font-weight: bold; text-align: center; }}
-        .header-box {{
-            background: linear-gradient(135deg, #0C63AF 0%, #1e88e5 100%);
-            color: white;
-            padding: 24px;
-            border-radius: 12px;
-            margin-bottom: 24px;
-            box-shadow: 0 4px 12px rgba(12, 99, 175, 0.2);
-        }}
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NIW 巡检仪表盘</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+body{{
+  font-family:"Segoe UI","Microsoft YaHei",sans-serif;
+  background:#0D1117;color:#C9D1D9;font-size:13px;line-height:1.5;
+}}
+/* ── TopBar ── */
+.top-bar{{
+  background:linear-gradient(135deg,#0C63AF,#1565C0);
+  padding:18px 30px;display:flex;justify-content:space-between;align-items:center;
+  box-shadow:0 2px 12px rgba(0,0,0,.5);
+}}
+.top-bar h1{{font-size:20px;font-weight:700;color:#fff;}}
+.top-bar .meta{{font-size:11px;color:rgba(255,255,255,.65);margin-top:3px;}}
+.btn-refresh{{
+  background:rgba(255,255,255,.12);color:#fff;
+  border:1px solid rgba(255,255,255,.3);padding:6px 18px;
+  border-radius:6px;cursor:pointer;font-size:13px;
+}}
+.btn-refresh:hover{{background:rgba(255,255,255,.22);}}
+/* ── Stats ── */
+.stats-bar{{
+  display:flex;gap:12px;padding:14px 30px;
+  background:#161B22;border-bottom:1px solid #30363D;flex-wrap:wrap;
+}}
+.stat-box{{
+  background:#21262D;border:1px solid #30363D;border-radius:8px;
+  padding:10px 18px;min-width:120px;text-align:center;
+}}
+.stat-box .num{{font-size:24px;font-weight:700;}}
+.stat-box .label{{font-size:11px;color:#8B949E;margin-top:2px;}}
+.num-pass{{color:#3FB950;}} .num-fail{{color:#F85149;}}
+.num-none{{color:#8B949E;}} .num-total{{color:#58A6FF;}}
+/* ── Section Title ── */
+.section-title{{
+  padding:13px 30px 8px;font-size:13px;font-weight:700;
+  color:#8BE9FD;letter-spacing:.8px;
+  background:#161B22;border-bottom:1px solid #30363D;
+}}
+/* ── Cards Grid ── */
+.cards-grid{{
+  padding:14px 30px;display:grid;gap:14px;background:#0D1117;
+}}
+/* ── Station Card ── */
+.station-card{{border:1px solid #30363D;border-radius:8px;overflow:hidden;background:#161B22;}}
+.station-card.no-data{{opacity:.5;}}
+.card-header{{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 16px;font-weight:700;font-size:13px;
+}}
+.header-ok{{background:#0D4429;border-bottom:2px solid #3FB950;}}
+.header-err{{background:#490202;border-bottom:2px solid #F85149;}}
+.dim{{background:#21262D;border-bottom:1px solid #30363D;}}
+.card-meta{{display:flex;align-items:center;gap:10px;}}
+.station-name{{color:#E6EDF3;}}
+.rec-count{{font-size:11px;color:#8B949E;font-weight:400;}}
+.card-body{{padding:10px 14px;}}
+.no-data-msg{{color:#8B949E;font-style:italic;padding:8px 0;}}
+/* ── Badge ── */
+.badge{{padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap;}}
+.badge-ok{{background:#238636;color:#fff;}}
+.badge-err{{background:#B91C1C;color:#fff;}}
+.badge-none{{background:#30363D;color:#8B949E;}}
+.latest-tag{{
+  background:#1f538d;color:#79c0ff;
+  font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;
+}}
+/* ── Record Block (details/summary) ── */
+.record-block{{
+  border:1px solid #30363D;border-radius:6px;margin-bottom:8px;overflow:hidden;
+}}
+.record-block.rec-ok{{border-left:3px solid #3FB950;}}
+.record-block.rec-err{{border-left:3px solid #F85149;}}
+.rec-summary{{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 12px;cursor:pointer;user-select:none;
+  background:#21262D;list-style:none;
+}}
+.rec-summary:hover{{background:#2D333B;}}
+.rec-summary::-webkit-details-marker{{display:none;}}
+.record-block[open] .rec-summary{{background:#2D333B;}}
+.rec-ts{{font-family:"Consolas",monospace;font-size:12px;color:#8B949E;}}
+.rec-body{{padding:12px 14px;background:#0D1117;}}
+/* ── Section labels ── */
+.section-label{{
+  font-size:11px;font-weight:700;color:#8B949E;
+  letter-spacing:.5px;margin:10px 0 6px;text-transform:uppercase;
+}}
+/* ── Data Table ── */
+.table-scroll{{overflow-x:auto;margin-bottom:10px;}}
+.data-table{{
+  border-collapse:collapse;width:100%;font-size:12px;
+  font-family:"Consolas","Courier New",monospace;white-space:nowrap;
+}}
+.data-table th{{
+  background:#0C63AF;color:#fff;padding:6px 12px;
+  text-align:left;border:1px solid #1565C0;
+}}
+.data-table td{{
+  padding:5px 12px;border:1px solid #30363D;color:#C9D1D9;
+}}
+.data-table tr.row-ok td{{background:#0D4429;color:#3FB950;}}
+.data-table tr.row-err td{{background:#490202;color:#F85149;}}
+.data-table tr.row-warn td{{background:#3D2B00;color:#F0A500;}}
+.data-table tr:not(.row-ok):not(.row-err):not(.row-warn):hover td{{background:#1C2128;}}
+/* ── Log Lines ── */
+.log-wrap{{
+  background:#010409;border:1px solid #21262D;border-radius:6px;
+  padding:8px 10px;max-height:300px;overflow-y:auto;
+  font-family:"Consolas","Courier New",monospace;font-size:12px;
+}}
+.log-line{{padding:1px 6px;border-radius:3px;margin:1px 0;white-space:pre-wrap;word-break:break-all;}}
+.log-ok{{background:#0D4429;color:#3FB950;}}
+.log-err{{background:#490202;color:#F85149;}}
+.log-warn{{background:#3D2B00;color:#F0A500;}}
+.log-ckpt{{background:#082032;color:#58A6FF;}}
+.log-station{{color:#8BE9FD;font-weight:bold;}}
+.log-info{{color:#8B949E;}}
+.log-info-dim{{color:#484F58;font-style:italic;padding:8px 0;}}
+/* ── Footer ── */
+footer{{
+  text-align:center;padding:18px;color:#484F58;
+  font-size:11px;background:#0D1117;border-top:1px solid #21262D;
+}}
+</style>
 </head>
 <body>
-    <div class="container my-4">
-        <div class="header-box d-flex justify-content-between align-items-center">
-            <div>
-                <h3 class="mb-1 fw-bold">📊 NIW 关卡巡检实时 HTML 仪表盘</h3>
-                <p class="mb-0 text-white-50" style="font-size: 0.9rem;">最近 24 小时历史 Checkpoint 自动数据汇总 (超时 24h 自动物理清理)</p>
-            </div>
-            <div class="text-end">
-                <div class="badge bg-light text-dark mb-1 p-2">最后更新: {now_str}</div>
-                <div><button onclick="location.reload();" class="btn btn-sm btn-outline-light">🔄 刷新数据</button></div>
-            </div>
-        </div>
-
-        <div class="row mb-4">
-            <div class="col-md-4">
-                <div class="p-3 bg-white rounded shadow-sm border-start border-4 border-primary">
-                    <small class="text-muted d-block">活跃 Checkpoint 关卡数</small>
-                    <span class="fs-3 fw-bold text-primary">{len(records)}</span>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="p-3 bg-white rounded shadow-sm border-start border-4 border-success">
-                    <small class="text-muted d-block">数据保存期</small>
-                    <span class="fs-3 fw-bold text-success">24 小时自动循环</span>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="p-3 bg-white rounded shadow-sm border-start border-4 border-info">
-                    <small class="text-muted d-block">视觉还原引擎</small>
-                    <span class="fs-3 fw-bold text-info">OK 绿底 / 报错红底 / 提醒黄底</span>
-                </div>
-            </div>
-        </div>
-
-        {stations_html if stations_html else '<div class="alert alert-info text-center p-4">暂无 24 小时内的 Checkpoint 巡检记录。启动关卡巡检后将自动呈现在此！</div>'}
-
-        <footer class="text-center text-muted my-5" style="font-size: 0.85rem;">
-            Error Log Bot 巡检系统 &copy; {time.strftime('%Y')} | 自动清理解析引擎
-        </footer>
+<div class="top-bar">
+  <div>
+    <h1>📊 NIW 关卡巡检仪表盘</h1>
+    <div class="meta">
+      数据源: {LOG_ROOT} &nbsp;|&nbsp;
+      保留最近 12 小时记录 &nbsp;|&nbsp;
+      最后生成: {now_str}
     </div>
+  </div>
+  <button class="btn-refresh" onclick="location.reload()">🔄 刷新</button>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-box"><div class="num num-total">{total}</div><div class="label">总关卡数</div></div>
+  <div class="stat-box"><div class="num num-pass">{passed}</div><div class="label">✅ 最新通过</div></div>
+  <div class="stat-box"><div class="num num-fail">{failed}</div><div class="label">❌ 最新异常</div></div>
+  <div class="stat-box"><div class="num num-none">{no_data}</div><div class="label">⬜ 暂无数据</div></div>
+  <div class="stat-box"><div class="num num-total">{total_runs}</div><div class="label">📋 历史记录总数</div></div>
+</div>
+
+<div class="section-title">🔷 NIW 区域 (15 站)</div>
+<div class="cards-grid">{niw_html}</div>
+
+<div class="section-title">🔶 Copier & Server 区域 (9 站)</div>
+<div class="cards-grid">{copier_html}</div>
+
+<footer>
+  Error Log Bot 巡检系统 &copy; {time.strftime('%Y')} &nbsp;|&nbsp;
+  数据目录: {LOG_ROOT}
+</footer>
 </body>
-</html>
-"""
-        return full_html
+</html>"""

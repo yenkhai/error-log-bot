@@ -2,55 +2,220 @@
 ================================================================================
 第15站 1 Wallet Pending 关卡检查器 (pages/niw/page_15_one_wallet_pending.py)
 --------------------------------------------------------------------------------
-作用: 
-1. 自动进入 1 Wallet Pending 页面 (Menu ID: apy_b0i17text)。
-2. 校验左侧表格 Total Pending Transaction 的 120s 积压列是否为 0。
-3. (依据规则: 忽略右侧表格), 若左表 120s 列无积压且全绿，点击 Checkpoint 完成全套 NIW 巡检！
+【核心功能详解与判定规则】
+1. 页面分为左右两大板块:
+   - 左侧表格: Total Pending Transaction (Tier 1 规则)
+     * 字段: Company, Type, 120s (超时积压), Function
+     * 规则: 120s 积压数 > 0 或出现红字/红底 -> Tier 1 致命阻断
+   - 右侧表格: 5 个 Pending API 监控 (Tier 3 规则)
+     * 字段: Company, Rollback, Acknowledgement, Lose, Settle, Promotion (各含 120s 列)
+     * 规则: 120s 积压数 > 0 或出现红字/红底 -> Tier 3 提醒通知 (【不阻断 Checkpoint】)
+2. 全量打印:
+   - 左侧所有公司的 Total Pending 状态
+   - 右侧所有公司的 5 大 API 挂单状态
+3. 全部正常或仅有 Tier 3 时，点击 Checkpoint 提交通关！
 ================================================================================
 """
 
 import time
-from selenium.webdriver.common.by import By
 from core.base_checker import BaseChecker
+
 
 class OneWalletPendingChecker(BaseChecker):
     def check(self) -> bool:
-        self.log_station_header("第15站 1 Wallet Pending", menu_id="apy_b0i17text")
+        self.log_station_header("第15站 1 Wallet Pending", menu_id="apy_b0i17text", page_key="niw_15")
         try:
-            # 导航切入页面
-            self.navigate_to_menu("1 Wallet Pending", menu_id="apy_b0i17text", section="NIW")
+            # 1. 导航切入 1 Wallet Pending 页面 (等待 4 秒加载)
+            self.navigate_to_menu("1 Wallet Pending", menu_id="apy_b0i17text", section="NIW", wait_seconds=4)
 
-            # 在内存中抓取左侧表格 120s 积压列数据
-            pending_data = self.driver.execute_script("""
-                var tables = document.querySelectorAll("table");
-                if (tables.length === 0) return { total120s: 0 };
-                var leftTable = tables[0];
-                var rows = leftTable.querySelectorAll("tr");
-                var total120s = 0;
-                for (var i = 0; i < rows.length; i++) {
-                    var tds = rows[i].querySelectorAll("td");
-                    if (tds.length >= 4) {
-                        var val = tds[3].innerText.trim(); // 第4列为 120s 超时列
-                        if (val && !isNaN(val)) total120s += parseInt(val);
+            # 2. 核心 JavaScript 脚本：同时提取左右两侧全部表格数据
+            parsed_data = self.driver.execute_script("""
+                var result = {
+                    leftRows: [],
+                    leftErrCount: 0,
+                    rightRows: [],
+                    rightWarnCount: 0,
+                    tableHeaders: ["Company", "Type", "120s Pending", "Right APIs Status", "Result"],
+                    tableRows: []
+                };
+
+                function isRed(colorStr) {
+                    if (!colorStr) return false;
+                    var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+                    if (m) {
+                        var r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+                        return (r >= 170 && g <= 110 && b <= 110);
                     }
+                    return false;
                 }
-                return { total120s: total120s, rows: rows.length };
+
+                function cleanNum(txt) {
+                    if (!txt) return 0;
+                    var n = parseInt(txt.replace(/[^0-9]/g, ""));
+                    return isNaN(n) ? 0 : n;
+                }
+
+                var tables = document.querySelectorAll("table");
+                var leftMap = {};  // company -> { type, val120s, fn, isErr }
+                var rightMap = {}; // company -> { warns, isWarn }
+
+                tables.forEach(function(t) {
+                    if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null) return;
+                    var txt = t.innerText ? t.innerText.trim() : "";
+
+                    // ── A. 左侧表格 (Total Pending Transaction - Tier 1) ──
+                    if (txt.indexOf("Total Pending Transaction") !== -1 || (txt.indexOf("Company") !== -1 && txt.indexOf("120s") !== -1 && txt.indexOf("Function") !== -1)) {
+                        var rows = t.querySelectorAll("tr");
+                        rows.forEach(function(r) {
+                            var tds = r.querySelectorAll("td, th");
+                            if (tds.length >= 3) {
+                                var com = tds[0].innerText.trim();
+                                var type = tds[1].innerText.trim();
+                                var val120sStr = tds[2].innerText.trim();
+                                var fn = tds.length >= 4 ? tds[3].innerText.trim() : "-";
+                                var bg = window.getComputedStyle(tds[2]).backgroundColor;
+                                var fg = window.getComputedStyle(tds[2]).color;
+
+                                if (com && com !== "Company" && com !== "Type" && com.indexOf("Total Pending") === -1 && com.indexOf("Checkpoint") === -1) {
+                                    var val120s = cleanNum(val120sStr);
+                                    var isRedCell = isRed(bg) || isRed(fg);
+                                    var isErr = val120s > 0 || isRedCell;
+
+                                    if (isErr) result.leftErrCount++;
+
+                                    var tag = isErr ? " [ERROR/Tier 1 积压阻断]" : " [OK/正常]";
+                                    var line = com + " (" + type + "): 120s = " + val120sStr + ", Function = " + fn + tag;
+                                    result.leftRows.push(line);
+
+                                    leftMap[com] = {
+                                        type: type,
+                                        val120s: val120sStr,
+                                        isErr: isErr
+                                    };
+                                }
+                            }
+                        });
+                    }
+
+                    // ── B. 右侧表格 (5 个 Pending API - Tier 3) ──
+                    if (txt.indexOf("Total Pending Rollback Api") !== -1 || txt.indexOf("Total Pending Acknowledgement Api") !== -1 || (txt.indexOf("Rollback") !== -1 && txt.indexOf("Promotion") !== -1)) {
+                        var rows = t.querySelectorAll("tr");
+                        rows.forEach(function(r) {
+                            var tds = r.querySelectorAll("td, th");
+                            if (tds.length >= 11) {
+                                var com = tds[0].innerText.trim();
+                                if (com && com !== "Company" && com.indexOf("Total Pending") === -1) {
+                                    var apiNames = ["Rollback", "Ack", "Lose", "Settle", "Promo"];
+                                    var rowWarns = [];
+
+                                    for (var i = 0; i < 5; i++) {
+                                        var valIdx = 2 + (i * 2); // 120s 对应列索引: 2, 4, 6, 8, 10
+                                        if (valIdx < tds.length) {
+                                            var valStr = tds[valIdx].innerText.trim();
+                                            var numVal = cleanNum(valStr);
+                                            var bg = window.getComputedStyle(tds[valIdx]).backgroundColor;
+                                            var fg = window.getComputedStyle(tds[valIdx]).color;
+
+                                            if (numVal > 0 || isRed(bg) || isRed(fg)) {
+                                                rowWarns.push(apiNames[i] + "=" + valStr);
+                                            }
+                                        }
+                                    }
+
+                                    var isWarn = rowWarns.length > 0;
+                                    if (isWarn) result.rightWarnCount++;
+
+                                    var tag = isWarn ? " [WARN/Tier 3 仅通知: " + rowWarns.join(", ") + "]" : " [OK/全部0]";
+                                    var line = com + ": " + (isWarn ? rowWarns.join(", ") : "5 APIs 全 0 积压") + tag;
+                                    result.rightRows.push(line);
+
+                                    rightMap[com] = {
+                                        warns: isWarn ? rowWarns.join(", ") : "All 0",
+                                        isWarn: isWarn
+                                    };
+                                }
+                            }
+                        });
+                    }
+                });
+
+                // 组装结构化表格行
+                var allComps = Object.keys(leftMap);
+                if (allComps.length === 0) allComps = Object.keys(rightMap);
+
+                allComps.forEach(function(com) {
+                    var lInfo = leftMap[com] || { type: "-", val120s: "0", isErr: false };
+                    var rInfo = rightMap[com] || { warns: "All 0", isWarn: false };
+
+                    var statusText = "OK/正常";
+                    if (lInfo.isErr) {
+                        statusText = "ERROR/Tier 1 阻断";
+                    } else if (rInfo.isWarn) {
+                        statusText = "WARN/Tier 3 提醒";
+                    }
+
+                    result.tableRows.push([
+                        com,
+                        lInfo.type,
+                        lInfo.val120s,
+                        rInfo.warns,
+                        statusText
+                    ]);
+                });
+
+                return result;
             """)
 
-            self.log_data_extracted(f"抓取到 1 Wallet Pending 左侧 Total Pending Transaction 数据表")
-            self.log_check_method("校验左侧表格 120s 超时积压列数值是否全为 0 (自动忽略右侧表格)")
+            left_rows = parsed_data.get("leftRows", [])
+            left_err = parsed_data.get("leftErrCount", 0)
+            right_rows = parsed_data.get("rightRows", [])
+            right_warn = parsed_data.get("rightWarnCount", 0)
 
-            total_120s = pending_data.get("total120s", 0)
+            # 3. 组装全量巡检日志
+            all_summary = ["【1 Wallet Pending 左右两侧全量数据明细】:"]
+            
+            all_summary.append("==================================================")
+            all_summary.append("PART 1: 【左侧表格】 Total Pending Transaction (Tier 1 规则)")
+            all_summary.append("==================================================")
+            if left_rows:
+                all_summary.extend([f"   * {line}" for line in left_rows])
+            else:
+                all_summary.append("   * (左侧表格暂无数据或全部为 0)")
 
-            if total_120s > 0:
-                self.log_data_summary([f"1 Wallet Pending 左表 120s 存在 {total_120s} 单超时积压 [ERROR/红字未完成]"])
-                self.log_check_result(False, "1 Wallet Pending 存在 120s 超时积压，阻断 Checkpoint。")
+            all_summary.append("\n==================================================")
+            all_summary.append("PART 2: 【右侧表格】 5 个 Pending API 监控 (Tier 3 规则: 仅通知不阻断)")
+            all_summary.append("==================================================")
+            if right_rows:
+                all_summary.extend([f"   * {line}" for line in right_rows])
+            else:
+                all_summary.append("   * (右侧表格暂无数据或全部为 0)")
+
+            total_items = len(left_rows) + len(right_rows)
+            self.log_data_extracted(f"成功抓取 1 Wallet Pending 左右两侧共 {total_items} 条监控记录 (左表 Tier 1 错误: {left_err}, 右表 Tier 3 提示: {right_warn})")
+            self.log_check_method("全量打印左右两侧: 左侧 120s 积压 > 0 为 Tier 1 (阻断 Checkpoint)；右侧 5 大 API 积压 > 0 为 Tier 3 (仅 Notify 提示不阻断)")
+            self.log_data_summary(all_summary)
+
+            # 4. 记录结构化表格供 ASCII 文本日志与 HTML 仪表盘使用
+            t_headers = parsed_data.get("tableHeaders", ["Company", "Type", "120s", "Right APIs", "Status"])
+            t_rows = parsed_data.get("tableRows", [])
+            if t_rows:
+                self.log_table_data(t_headers, t_rows)
+
+            # 5. Checkpoint 巡检结论判定
+            if left_err > 0:
+                self.log(f"[Error] 1 Wallet Pending 左侧检测到 {left_err} 项 120s 超时积压，属于 Tier 1 致命异常，阻断 Checkpoint！")
+                if right_warn > 0:
+                    self.log(f"[Warn] 同时右侧存在 {right_warn} 项 Tier 3 提示 (仅通知不阻断)")
+                self.log_check_result(False, f"1 Wallet Pending 左侧存在 {left_err} 项 120s 超时积压，阻断 Checkpoint。")
                 return False
             else:
-                self.log_data_summary(["1 Wallet Pending 左表 120s 积压列为 0，全绿无错。"])
-                self.log_check_result(True, "1 Wallet Pending 完全正常。")
-                self.click_checkpoint()
-                return True
+                if right_warn > 0:
+                    self.log(f"[Notice] 1 Wallet Pending 右侧检测到 {right_warn} 项 API 积压，符合规则：仅 Notify 提示，【不阻断 Checkpoint】！")
+                self.log_check_result(True, "1 Wallet Pending 左侧 120s 积压全部为 0，巡检通过！")
+
+            # 6. 点击 Checkpoint 打勾提交
+            self.click_checkpoint()
+            return True
 
         except Exception as e:
             self.log_check_result(False, f"1 Wallet Pending 检查出现异常: {e}")

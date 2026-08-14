@@ -8,6 +8,7 @@ Error Log 日志抓取与导出选项卡 UI 模块 (gui/tab_error_log.py)
    - 左侧: 绿色大字号 Terminal 实时运行调试日志。
    - 右侧: 红色大字号 >10,000 条记录自动跳过记录警报框。
 3. 调度后台服务 ErrorLogScraperService 执行多线程日志抓取导出任务。
+4. 全局互斥锁支持：当 Checkpoint 巡检在运行时，自动禁用并阻止抓取，防止浏览器冲突。
 ================================================================================
 """
 
@@ -15,11 +16,13 @@ import threading
 import customtkinter as ctk
 from services.error_log_scraper import ErrorLogScraperService
 
+
 class ErrorLogTab(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent)
-        self.app = app # 主窗口引用
-        self.service = None # 抓取服务实例对象
+        self.app = app               # 主窗口引用
+        self.service = None          # 抓取服务实例对象
+        self.is_running = False      # 运行状态标识
         self.build_ui()
 
     def build_ui(self):
@@ -63,6 +66,33 @@ class ErrorLogTab(ctk.CTkFrame):
         self.txt_skip.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="nsew")
         self.txt_skip.configure(state="disabled")
 
+        # 初始调用更新按钮状态
+        self.update_button_states()
+
+    def update_button_states(self):
+        """
+        根据全局互斥状态更新按钮状态：
+        - 自身运行中 (is_running=True): [RUN] 禁用, [STOP] 启用
+        - 另一个 Tab (Checkpoint) 运行中: [RUN] 禁用, [STOP] 禁用
+        - 均空闲: [RUN] 启用, [STOP] 禁用
+        """
+        def apply():
+            is_checkpoint_running = False
+            if hasattr(self.app, 'checkpoint_tab') and getattr(self.app.checkpoint_tab, 'is_running', False):
+                is_checkpoint_running = True
+
+            if self.is_running:
+                self.btn_start.configure(state="disabled")
+                self.btn_stop.configure(state="normal")
+            elif is_checkpoint_running:
+                self.btn_start.configure(state="disabled")
+                self.btn_stop.configure(state="disabled")
+            else:
+                self.btn_start.configure(state="normal")
+                self.btn_stop.configure(state="disabled")
+
+        self.after(0, apply)
+
     def log(self, message: str):
         """主运行日志追加入口"""
         def append():
@@ -86,15 +116,29 @@ class ErrorLogTab(ctk.CTkFrame):
         self.txt_skip.delete("1.0", "end")
         self.txt_skip.configure(state="disabled")
 
+    def _check_cross_tab_busy(self) -> bool:
+        """检查 Checkpoint 自动化巡检是否正在运行"""
+        if hasattr(self.app, 'checkpoint_tab') and getattr(self.app.checkpoint_tab, 'is_running', False):
+            self.log("[WARN] 🚫 拒绝执行：Checkpoint 自动化巡检正在运行中！为了防止浏览器冲突，请等待或停止巡检任务后再启动 Error Log 抓取。")
+            return True
+        return False
+
     def start_scrape(self):
         """启动 Error Log 抓取后台任务"""
+        if self.is_running or self._check_cross_tab_busy():
+            return
+
         user, pwd = self.app.get_credentials()
         if not user or not pwd:
             self.log("[WARN] 全局账号或密码为空，请输入有效的账号和密码！")
             return
 
-        self.btn_start.configure(state="disabled")
-        self.btn_stop.configure(state="normal")
+        self.is_running = True
+        if hasattr(self.app, 'notify_task_state_changed'):
+            self.app.notify_task_state_changed()
+        else:
+            self.update_button_states()
+
         self.service = ErrorLogScraperService(self.log, self.skip_log)
         threading.Thread(target=self.run_service, args=(user, pwd), daemon=True).start()
 
@@ -111,7 +155,8 @@ class ErrorLogTab(ctk.CTkFrame):
         except Exception as e:
             self.log(f"[ERROR] 运行抓取服务出错: {e}")
         finally:
-            def reset():
-                self.btn_start.configure(state="normal")
-                self.btn_stop.configure(state="disabled")
-            self.after(0, reset)
+            self.is_running = False
+            if hasattr(self.app, 'notify_task_state_changed'):
+                self.app.notify_task_state_changed()
+            else:
+                self.update_button_states()

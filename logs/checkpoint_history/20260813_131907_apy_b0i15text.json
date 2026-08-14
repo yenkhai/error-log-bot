@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-08-13 13:19:07",
+  "timestamp_raw": 1786598347.249557,
+  "station_id": "apy_b0i15text",
+  "station_name": "第13站 HG Percentages",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【HG Percentages 全量巡检数据明细 (RCM)】:",
+    "--- [1. HG Percentages 监控板块 (共 2 个公司节点)] ---",
+    "   * s0010: Count(Editor) = 0, Editor = Correct, Count(Betting) = 0, Betting = Correct [OK/正常绿字]",
+    "   * k0002: Count(Editor) = 0, Editor = Correct, Count(Betting) = 0, Betting = Correct [OK/正常绿字]"
+  ],
+  "table_data": {}
+}

@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-08-13 07:37:13",
+  "timestamp_raw": 1786577833.2738519,
+  "station_id": "apy_b0i25text",
+  "station_name": "第07站 Robot Monitor",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【Robot Monitor 全量巡检数据明细】:",
+    "--- [Robot 运行状态列表 (共 2 个)] ---",
+    "   * Robot ID: 998 | Details: Nv06 live download event redis | TimeStamp: 2026-08-12 19:37:04",
+    "   * Robot ID: 999 | Details: Nv06 download live channel robot | TimeStamp: 2026-08-12 19:37:03"
+  ],
+  "table_data": {}
+}

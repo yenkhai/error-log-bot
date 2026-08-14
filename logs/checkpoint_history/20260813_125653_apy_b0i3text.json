@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-08-13 12:56:53",
+  "timestamp_raw": 1786597013.9134738,
+  "station_id": "apy_b0i3text",
+  "station_name": "第2站 CCL Recover",
+  "status": "SUCCESS",
+  "summary_list": [
+    "【CCL Recover 全量 Satellite 恢复状态明细 (共 14 个节点)】:",
+    "   * RCM: nv01-s0001 -> Last Recover: 2026-08-13 00:01:01 [OK/正常绿底]",
+    "   * RCM: nv01-d0005 -> Last Recover: 2026-08-13 00:01:01 [OK/正常绿底]",
+    "   * RCM: nv01-d0008 -> Last Recover: 2026-08-13 00:01:02 [OK/正常绿底]",
+    "   * RCM: nv01-d0009 -> Last Recover: 2026-08-13 00:01:01 [OK/正常绿底]",
+    "   * RCM: nv01-d0011 -> Last Recover: 2026-08-13 00:01:05 [OK/正常绿底]",
+    "   * RCM: nv01-d0012 -> Last Recover: 2026-08-13 00:01:03 [OK/正常绿底]",
+    "   * RCM: nv01-d0013 -> Last Recover: 2026-08-13 00:01:07 [OK/正常绿底]",
+    "   * RCM: nv01-d0015 -> Last Recover: 2026-08-13 00:01:02 [OK/正常绿底]",
+    "   * RCM: nv01-d0032 -> Last Recover: 2026-08-13 00:01:01 [OK/正常绿底]",
+    "   * RCM: nv05-s0010 -> Last Recover: 2026-08-13 00:01:01 [OK/正常绿底]",
+    "   * RCM: nv05-k0002 -> Last Recover: 2026-08-13 00:01:03 [OK/正常绿底]",
+    "   * LRCM: nv01-s0001 -> Last Recover: 2026-08-13 00:01:02 [OK/正常绿底]",
+    "   * LRCM: nv01-s0002 -> Last Recover: 2026-08-13 00:01:02 [OK/正常绿底]",
+    "   * LRCM: nv05-s0009 -> Last Recover: 2026-08-13 00:01:02 [OK/正常绿底]"
+  ],
+  "table_data": {}
+}

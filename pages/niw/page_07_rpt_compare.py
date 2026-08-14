@@ -26,11 +26,11 @@ class RPTCompareChecker(BaseChecker):
             # 1. 导航切入 RPT Compare 菜单
             self.navigate_to_menu("RPT Compare", menu_id="apy_b0i8text", section="NIW", wait_seconds=3)
 
-            # 2. 触发 search_data() 加载最新对比矩阵与机器人状态
+            # 2. 触发 search_data() 并动态智能轮询等待 Loading 动画消失与数据计算完毕
             self.driver.execute_script("""
                 if (typeof search_data === "function") search_data();
             """)
-            time.sleep(30)
+            self.wait_for_page_loaded(seconds=1.5, max_wait=35)
 
             # 3. 抓取全页 4 大红框区域数据
             p7_data = self.driver.execute_script("""
