@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 # ── 常量 ────────────────────────────────────────────────────────────────────
 DESKTOP_PATH     = os.path.join(os.path.expanduser("~"), "Desktop")
 LOG_ROOT         = os.path.join(DESKTOP_PATH, "CheckpointLogs")
-LOG_RETAIN_HOURS = 12   # 保留最近 12 小时
+LOG_RETAIN_HOURS = 8   # 保留最近 8 小时
 
 # 每个 page_key → (子目录, 文件名前缀)
 PAGE_LOG_META = {
@@ -68,7 +68,7 @@ class PageLogger:
     """
     桌面分页日志管理器
     - 每次 write_page_log() 新建一个独立 .txt 文件（文件名含时间戳）
-    - 超过 12 小时的旧文件自动删除
+    - 超过 8 小时的旧文件自动删除
     """
 
     # ── 目录初始化 ────────────────────────────────────────────────────────
