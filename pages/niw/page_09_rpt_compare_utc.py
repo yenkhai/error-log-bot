@@ -23,7 +23,7 @@ class RPTCompareUTCChecker(BaseChecker):
         self.log_station_header("第9站 RPT Compare UTC", menu_id="apy_b0i10text")
         try:
             # 1. 导航切入 RPT Compare UTC 页面
-            self.navigate_to_menu("RPT Compare UTC", menu_id="apy_b0i10text", section="NIW", wait_seconds=2)
+            self.navigate_to_menu("RPT Compare UTC", menu_id="apy_b0i10text", section="NIW")
 
             # 2. 点击 Search 触发最新查询
             self.click_search_button()

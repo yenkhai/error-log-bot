@@ -28,7 +28,7 @@ class RPTCRSChecker(BaseChecker):
         self.log_station_header("第14站 RPT CRS", menu_id="apy_b0i16text", page_key="niw_14")
         try:
             # 1. 导航切入 RPT CRS 页面 (基础初始导航 3 秒)
-            self.navigate_to_menu("RPT CRS", menu_id="apy_b0i16text", section="NIW", wait_seconds=3)
+            self.navigate_to_menu("RPT CRS", menu_id="apy_b0i16text", section="NIW")
 
             # 2. 智能动态轮询：等待所有表格中每个区间的 AJAX 状态数据完全渲染填充完毕
             max_poll_seconds = 60
