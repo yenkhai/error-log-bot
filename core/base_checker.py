@@ -89,9 +89,7 @@ class BaseChecker:
 
     def log_check_result(self, is_success: bool, summary_msg: str):
         """
-        打印最终判定结论，并自动：
-        1. 写入桌面 .txt 日志文件 (PageLogger)
-        2. 重新渲染 HTML 仪表盘 (ReportManager)
+        打印最终判定结论，并自动写入桌面 .txt 日志文件 (PageLogger)
         """
         if is_success:
             self.log(f"[CHECK RESULT] SUCCESS: {summary_msg}")
@@ -117,13 +115,6 @@ class BaseChecker:
                     table_headers=getattr(self, "_current_table_headers", None),
                     table_rows=getattr(self, "_current_table_rows", None)
                 )
-        except Exception:
-            pass
-
-        # 2. 自动更新 HTML 仪表盘
-        try:
-            from core.report_manager import ReportManager
-            ReportManager.generate_html_dashboard()
         except Exception:
             pass
 
@@ -256,60 +247,77 @@ class BaseChecker:
 
             time.sleep(poll_interval)
 
-    def navigate_to_menu(self, menu_title: str, menu_id: str = None, section: str = "NIW", wait_seconds: int = 4):
+    def navigate_to_menu(self, menu_title: str, menu_id: str = None, section: str = "NIW", wait_seconds: int = 4, retry_count: int = 1):
         """
-        [通用关卡导航函数]
+        [通用关卡导航函数 (支持网络抖动自动重试机制)]
         1. 自动在顶部 Frame 中切换 NIW / Copier & Server 分组选项卡。
         2. 根据 Menu ID 或 菜单文本名称 定位具体的关卡按钮并点击。
         3. 自动切入 mainFrame 框架，并调用 wait_for_page_loaded() 等待页面载入完。
+        4. 若遇到网络抖动卡顿导致定位超时，自动刷新重载并重试 1 次。
         """
-        self.switch_to_menu_frame()
-        
-        # 激活顶层 Tab 选项卡 (NIW 或 Copier & Server)
-        try:
-            if section == "NIW":
-                niw_tab = self.driver.find_elements(By.XPATH, "//td[@id='apy_b0i1text']//a | //font[text()='NIW']")
-                if niw_tab:
-                    self.driver.execute_script("arguments[0].click();", niw_tab[0])
-                    time.sleep(0.5)
-            elif section == "Copier":
-                copier_tab = self.driver.find_elements(By.XPATH, "//td[@id='apy_b0i18text']//a | //font[contains(text(), 'Copier')]")
-                if copier_tab:
-                    self.driver.execute_script("arguments[0].click();", copier_tab[0])
-                    time.sleep(0.5)
-        except Exception:
-            pass
-
-        # 查找具体关卡的点击链接 (优先通过 ID 查找，找不到则通过文本查找)
-        menu_link = None
-        if menu_id:
+        for attempt in range(retry_count + 1):
             try:
-                elems = self.driver.find_elements(By.XPATH, f"//td[@id='{menu_id}']//a")
-                if elems:
-                    menu_link = elems[0]
-            except Exception:
-                pass
-        
-        if not menu_link:
-            try:
-                elems = self.driver.find_elements(By.XPATH, f"//a[contains(text(), '{menu_title}')]")
-                if elems:
-                    menu_link = elems[0]
-            except Exception:
-                pass
+                self.switch_to_menu_frame()
+                
+                # 激活顶层 Tab 选项卡 (NIW 或 Copier & Server)
+                try:
+                    if section == "NIW":
+                        niw_tab = self.driver.find_elements(By.XPATH, "//td[@id='apy_b0i1text']//a | //font[text()='NIW']")
+                        if niw_tab:
+                            self.driver.execute_script("arguments[0].click();", niw_tab[0])
+                            time.sleep(0.5)
+                    elif section == "Copier":
+                        copier_tab = self.driver.find_elements(By.XPATH, "//td[@id='apy_b0i18text']//a | //font[contains(text(), 'Copier')]")
+                        if copier_tab:
+                            self.driver.execute_script("arguments[0].click();", copier_tab[0])
+                            time.sleep(0.5)
+                except Exception:
+                    pass
 
-        if not menu_link:
-            menu_link = WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.XPATH, f"//a[contains(text(), '{menu_title}')] | //td[contains(@id, 'text')]//a[contains(text(), '{menu_title}')]"))
-            )
-        
-        # 通过 JavaScript 触发点击，避免被页面遮挡拦截
-        self.driver.execute_script("arguments[0].click();", menu_link)
-        self.log(f"[NAVIGATE] 已成功进入 {menu_title} 页面 (Menu ID: {menu_id if menu_id else 'Text Match'})")
-        
-        # 自动切换到主页面框架并缓冲等待
-        self.switch_to_main_frame()
-        self.wait_for_page_loaded(seconds=wait_seconds)
+                # 查找具体关卡的点击链接 (优先通过 ID 查找，找不到则通过文本查找)
+                menu_link = None
+                if menu_id:
+                    try:
+                        elems = self.driver.find_elements(By.XPATH, f"//td[@id='{menu_id}']//a")
+                        if elems:
+                            menu_link = elems[0]
+                    except Exception:
+                        pass
+                
+                if not menu_link:
+                    try:
+                        elems = self.driver.find_elements(By.XPATH, f"//a[contains(text(), '{menu_title}')]")
+                        if elems:
+                            menu_link = elems[0]
+                    except Exception:
+                        pass
+
+                if not menu_link:
+                    menu_link = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, f"//a[contains(text(), '{menu_title}')] | //td[contains(@id, 'text')]//a[contains(text(), '{menu_title}')]"))
+                    )
+                
+                # 通过 JavaScript 触发点击，避免被页面遮挡拦截
+                self.driver.execute_script("arguments[0].click();", menu_link)
+                self.log(f"[NAVIGATE] 已成功进入 {menu_title} 页面 (Menu ID: {menu_id if menu_id else 'Text Match'})")
+                
+                # 自动切换到主页面框架并智能等待
+                self.switch_to_main_frame()
+                self.wait_for_page_loaded(seconds=wait_seconds)
+                return  # 导航成功，退出循环
+
+            except Exception as e:
+                if attempt < retry_count:
+                    self.log(f"[RETRY] ⚠️ 导航到 {menu_title} 遇到网络抖动，正在自动刷新并重试 (第 {attempt + 1} 次重试)...")
+                    try:
+                        self.driver.switch_to.default_content()
+                        self.driver.refresh()
+                        time.sleep(2)
+                    except Exception:
+                        pass
+                else:
+                    self.log(f"[ERROR] 导航到 {menu_title} 最终失败: {e}")
+                    raise e
 
     def select_rcm_company(self) -> bool:
         """

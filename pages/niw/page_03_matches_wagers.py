@@ -32,7 +32,16 @@ class MatchesWagersChecker(BaseChecker):
         self.log_station_header("第3站 Matches & Wagers", menu_id="apy_b0i4text", page_key="niw_03")
         try:
             # 1. 导航切入 Matches & Wagers 菜单页面 (等待数据加载 5 秒)
-            self.navigate_to_menu("Matches & Wagers", menu_id="apy_b0i4text", section="NIW", wait_seconds=5)
+            self.navigate_to_menu("Matches & Wagers", menu_id="apy_b0i4text", section="NIW")
+            
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
+            """
+                seconds（最小保底等待时间，默认 2~3 秒）：
+                给网页一点微小的初始缓冲时间，让浏览器有时间发起请求并把 Loading 动画挂出来。
+                日常推荐填 1 或 2；对于秒开的简单页面可以填 0.5。
+                max_wait（最大超时安全阈值，默认 30 秒）：
+                如果遇到网络极慢或死锁，最多等多少秒，防止程序无限卡死。一般保持默认 30 即可。
+            """
 
             # 2. 核心 JavaScript 脚本：精准提取数据并分解节点
             matches_data = self.driver.execute_script("""

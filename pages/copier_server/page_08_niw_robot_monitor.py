@@ -29,10 +29,10 @@ class NIWRobotMonitorChecker(BaseChecker):
         self.log_station_header("第08站 NIW Robot Monitor", menu_id="apy_b0i26text")
         try:
             # [步骤 1] 导航切入 NIW Robot Monitor 页面
-            self.navigate_to_menu("NIW Robot Monitor", menu_id="apy_b0i26text", section="Copier", wait_seconds=3.5)
-
-            # [步骤 2] 使用 JavaScript 解析 NIW Robot Monitor 表格
-            # 包含 RCM 和 LRCM 分组，表格列: Robot ID | RCM Details | Robot Interval | TimeStamp
+            self.navigate_to_menu("NIW Robot Monitor", menu_id="apy_b0i26text", section="Copier")
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
+            # [步骤 2] 使用 JavaScript 精准解析 rcmlist 与 lrcmlist 两个容器中的 Robot 表格
+            # 包含 RCM 和 LRCM 分组，表格列: Robot ID | Details | Robot Interval | TimeStamp
             robot_data = self.driver.execute_script("""
                 var result = {
                     rcmRobots: [],    // RCM 分组 Robot 列表
@@ -42,59 +42,60 @@ class NIWRobotMonitorChecker(BaseChecker):
                     totalCount: 0
                 };
 
-                var tables = document.querySelectorAll("table");
+                // 通用容器解析器
+                function parseContainer(containerId, targetArray) {
+                    var container = document.getElementById(containerId) || document.querySelector("#" + containerId);
+                    if (!container) return;
 
-                for (var t = 0; t < tables.length; t++) {
-                    var txt = tables[t].innerText ? tables[t].innerText.trim() : "";
+                    var rows = container.querySelectorAll("table tr");
+                    for (var r = 0; r < rows.length; r++) {
+                        var tds = rows[r].querySelectorAll("td");
+                        if (tds.length < 2) continue;
 
-                    // 通过关键词 'Robot ID' 和 'TimeStamp' 定位主表
-                    if ((txt.indexOf("Robot ID") !== -1 || txt.indexOf("Robot") !== -1)
-                        && txt.indexOf("TimeStamp") !== -1) {
+                        var robotId   = tds[0].innerText.trim();
+                        var details   = tds.length >= 3 ? tds[1].innerText.trim() : "-";
+                        var interval  = tds.length >= 4 ? tds[2].innerText.trim() : "-";
+                        var timestamp = tds.length >= 4 ? tds[3].innerText.trim() :
+                                       (tds.length >= 3 ? tds[2].innerText.trim() : tds[1].innerText.trim());
 
-                        // 判断该表格属于 RCM 还是 LRCM 区域
-                        var currentGroup = "RCM"; // 默认 RCM
-                        var parentNode = tables[t].parentElement;
-                        while (parentNode && parentNode.tagName !== "BODY") {
-                            var pTxt = parentNode.innerText || "";
-                            if (pTxt.indexOf("LRCM") !== -1) {
-                                // 检查当前表格在 LRCM 标头之后
-                                var lrcmPos = pTxt.indexOf("LRCM");
-                                var tablePos = pTxt.indexOf(txt.substring(0, 30));
-                                if (lrcmPos !== -1 && tablePos > lrcmPos) {
-                                    currentGroup = "LRCM";
+                        // 跳过表头行
+                        if (!robotId || robotId === "Robot ID" || robotId === "Robot" || robotId === "") continue;
+                        if (timestamp.indexOf("TimeStamp") !== -1 || details.indexOf("Details") !== -1) continue;
+
+                        targetArray.push({
+                            robotId: robotId,
+                            details: details,
+                            interval: interval,
+                            timestamp: timestamp
+                        });
+                    }
+                }
+
+                // 1. 精准提取 RCM 列表 (div#rcmlist)
+                parseContainer("rcmlist", result.rcmRobots);
+
+                // 2. 精准提取 LRCM 列表 (div#lrcmlist)
+                parseContainer("lrcmlist", result.lrcmRobots);
+
+                // 3. 容错后备机制 (若 DOM ID 发生变动)
+                if (result.rcmRobots.length === 0 && result.lrcmRobots.length === 0) {
+                    var tables = document.querySelectorAll("table");
+                    for (var t = 0; t < tables.length; t++) {
+                        var txt = tables[t].innerText || "";
+                        if (txt.indexOf("Robot ID") !== -1 && txt.indexOf("TimeStamp") !== -1) {
+                            var target = (txt.indexOf("LRCM") !== -1) ? result.lrcmRobots : result.rcmRobots;
+                            var rows = tables[t].querySelectorAll("tr");
+                            for (var r = 0; r < rows.length; r++) {
+                                var tds = rows[r].querySelectorAll("td");
+                                if (tds.length >= 2) {
+                                    var rId = tds[0].innerText.trim();
+                                    var det = tds.length >= 3 ? tds[1].innerText.trim() : "-";
+                                    var intv = tds.length >= 4 ? tds[2].innerText.trim() : "-";
+                                    var ts = tds.length >= 4 ? tds[3].innerText.trim() : tds[1].innerText.trim();
+                                    if (rId && rId !== "Robot ID") {
+                                        target.push({ robotId: rId, details: det, interval: intv, timestamp: ts });
+                                    }
                                 }
-                                break;
-                            }
-                            parentNode = parentNode.parentElement;
-                        }
-
-                        var rows = tables[t].querySelectorAll("tr");
-
-                        for (var r = 0; r < rows.length; r++) {
-                            var tds = rows[r].querySelectorAll("td");
-                            if (tds.length < 2) continue;
-
-                            var robotId   = tds[0].innerText.trim();
-                            var details   = tds.length >= 3 ? tds[1].innerText.trim() : "-";
-                            var interval  = tds.length >= 4 ? tds[2].innerText.trim() : "-";
-                            var timestamp = tds.length >= 4 ? tds[3].innerText.trim() :
-                                           (tds.length >= 3 ? tds[2].innerText.trim() : tds[1].innerText.trim());
-
-                            // 跳过表头行
-                            if (!robotId || robotId === "Robot ID" || robotId === "Robot" || robotId === "") continue;
-                            if (timestamp === "TimeStamp" || details === "RCM Details") continue;
-
-                            var entry = {
-                                robotId: robotId,
-                                details: details,
-                                interval: interval,
-                                timestamp: timestamp
-                            };
-
-                            if (currentGroup === "LRCM") {
-                                result.lrcmRobots.push(entry);
-                            } else {
-                                result.rcmRobots.push(entry);
                             }
                         }
                     }

@@ -23,11 +23,6 @@ class PendingWagerChecker(BaseChecker):
             # 1. 导航切入 Pending Wager 专属菜单
             self.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW")
 
-            # 进入 pending wager page 会自动刷新，无需再次点击 search 按钮
-            #self.log("[INFO] auto refresh, wait for 2 seconds...")
-            #self.wait_for_page_loaded(seconds=2)
-
-            time.sleep(2)
             # 2. 提取全表所有卫星公司 Pending 积压数据明细 (包含 Wager Pending 与 Mulp Pending)
             wager_info = self.driver.execute_script("""
                 var links = document.querySelectorAll("a[onclick*='drawTbl']");

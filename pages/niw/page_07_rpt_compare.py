@@ -24,7 +24,7 @@ class RPTCompareChecker(BaseChecker):
         self.log_station_header("第7站 RPT Compare", menu_id="apy_b0i8text")
         try:
             # 1. 导航切入 RPT Compare 菜单
-            self.navigate_to_menu("RPT Compare", menu_id="apy_b0i8text", section="NIW", wait_seconds=3)
+            self.navigate_to_menu("RPT Compare", menu_id="apy_b0i8text", section="NIW")
 
             # 2. 触发 search_data() 并动态智能轮询等待 Loading 动画消失与数据计算完毕
             self.driver.execute_script("""

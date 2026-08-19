@@ -25,8 +25,9 @@ class ResultProcessChecker(BaseChecker):
         self.log_station_header("第4站 Result Process", menu_id="apy_b0i5text")
         try:
             # 1. 导航切入 Result Process 菜单
-            self.navigate_to_menu("Result Process", menu_id="apy_b0i5text", section="NIW", wait_seconds=8)
+            self.navigate_to_menu("Result Process", menu_id="apy_b0i5text", section="NIW")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # 2. 精准提取 5 大监控表格数据
             p4_data = self.driver.execute_script("""
                 var result = {

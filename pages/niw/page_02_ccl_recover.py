@@ -28,11 +28,10 @@ class CCLRecoverChecker(BaseChecker):
                 if search_btn:
                     self.log("[SEARCH] 点击 CCL Recover Search 刷新按钮 (id: id_search_button)...")
                     self.driver.execute_script("arguments[0].click();", search_btn[0])
-                    self.wait_for_page_loaded(seconds=3)
+                    self.wait_for_page_loaded(seconds=2)
             except Exception as e:
                 self.log(f"[WARN] 点击 Search 刷新提示: {e}")
 
-            time.sleep(2)
 
             # 3. 在 JS 内存中抓取红框内 Satellite 与 Last Recover 数据及 RGB 背景色 (支持 RCM/LRCM 跨行继承)
             ccl_data = self.driver.execute_script("""

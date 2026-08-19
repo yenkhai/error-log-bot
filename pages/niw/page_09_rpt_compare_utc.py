@@ -26,8 +26,10 @@ class RPTCompareUTCChecker(BaseChecker):
             self.navigate_to_menu("RPT Compare UTC", menu_id="apy_b0i10text", section="NIW", wait_seconds=2)
 
             # 2. 点击 Search 触发最新查询
-            self.click_search_button(wait_seconds=5)
+            self.click_search_button()
 
+            self.wait_for_page_loaded(seconds=1.5, max_wait=35)
+            
             # 3. DOM 精准抓取 24 小时矩阵节点
             p9_data = self.driver.execute_script("""
                 var result = {

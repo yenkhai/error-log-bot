@@ -29,8 +29,9 @@ class RedisServerChecker(BaseChecker):
         self.log_station_header("第06站 Redis Server", menu_id="apy_b0i24text")
         try:
             # [步骤 1] 导航切入 Redis Server 页面
-            self.navigate_to_menu("Redis Server", menu_id="apy_b0i24text", section="Copier", wait_seconds=3.5)
+            self.navigate_to_menu("Redis Server", menu_id="apy_b0i24text", section="Copier")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 精准解析 Redis 服务器状态表格
             redis_data = self.driver.execute_script("""
                 var result = {

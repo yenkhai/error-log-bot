@@ -25,11 +25,11 @@ class RPTAIChecker(BaseChecker):
         self.log_station_header("第8站 RPT AI", menu_id="apy_b0i9text")
         try:
             # 1. 导航切入 RPT AI 页面
-            self.navigate_to_menu("RPT AI", menu_id="apy_b0i9text", section="NIW", wait_seconds=3)
+            self.navigate_to_menu("RPT AI", menu_id="apy_b0i9text", section="NIW")
 
             # 2. 点击 Search 触发最新查询
-            self.click_search_button(wait_seconds=10)
-
+            #self.click_search_button(wait_seconds=10)
+            self.wait_for_page_loaded(seconds=1.5, max_wait=35)
             # 3. DOM 精准抓取 24 家 Satellite 节点矩阵
             p8_data = self.driver.execute_script("""
                 var result = {

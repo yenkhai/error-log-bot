@@ -22,8 +22,9 @@ class RPTPolyMarketChecker(BaseChecker):
         self.log_station_header("第6站 RPT PolyMarket", menu_id="apy_b0i7text")
         try:
             # 1. 导航切入 RPT PolyMarket 菜单
-            self.navigate_to_menu("RPT PolyMarket", menu_id="apy_b0i7text", section="NIW", wait_seconds=5)
+            self.navigate_to_menu("RPT PolyMarket", menu_id="apy_b0i7text", section="NIW")
 
+            self.wait_for_page_loaded(seconds=0.5, max_wait=30)
             # 2. 精准抓取左框 Reset Log 与右框 7 天 RPT 矩阵数据
             p6_data = self.driver.execute_script("""
                 var result = {

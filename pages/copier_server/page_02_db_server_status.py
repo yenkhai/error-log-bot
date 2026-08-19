@@ -31,8 +31,9 @@ class DBServerStatusChecker(BaseChecker):
         self.log_station_header("第02站 DB Server Status", menu_id="apy_b0i20text")
         try:
             # [步骤 1] 导航切入 DB Server Status 页面 (section="Copier" 切换 Copier & Server 选项卡)
-            self.navigate_to_menu("DB Server Status", menu_id="apy_b0i20text", section="Copier", wait_seconds=3.5)
-
+            self.navigate_to_menu("DB Server Status", menu_id="apy_b0i20text", section="Copier")
+            
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 精准解析 mainFrame 内的 DB 服务器节点表格
             # 表格列顺序: No. | Host | Remarks | Th_connected | ratio | Partition Event | Function | Company | Product
             db_data = self.driver.execute_script("""

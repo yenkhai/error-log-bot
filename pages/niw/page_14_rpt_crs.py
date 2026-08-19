@@ -31,12 +31,13 @@ class RPTCRSChecker(BaseChecker):
             self.navigate_to_menu("RPT CRS", menu_id="apy_b0i16text", section="NIW", wait_seconds=3)
 
             # 2. 智能动态轮询：等待所有表格中每个区间的 AJAX 状态数据完全渲染填充完毕
-            max_poll_seconds = 30
+            max_poll_seconds = 60
             poll_interval = 1.5
             start_time = time.time()
             is_fully_loaded = False
             last_status = {}
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             self.log("[WAIT] 正在动态监测 RPT CRS 所有区间 AJAX 数据加载进度 (最大等待 30 秒)...")
 
             while (time.time() - start_time) < max_poll_seconds:

@@ -24,8 +24,10 @@ class HGPercentagesChecker(BaseChecker):
         self.log_station_header("第13站 HG Percentages", menu_id="apy_b0i15text")
         try:
             # [步骤 2] 导航切入 HG Percentages 页面，缓冲等待 3.5 秒让数据自动渲染
-            self.navigate_to_menu("HG Percentages", menu_id="apy_b0i15text", section="NIW", wait_seconds=5)
+            self.navigate_to_menu("HG Percentages", menu_id="apy_b0i15text", section="NIW")
 
+
+            self.wait_for_page_loaded(seconds=1.5, max_wait=35)
             # [步骤 3] JavaScript 脚本精准抓取 HG Percentages 表格数据
             p13_data = self.driver.execute_script("""
                 var result = {

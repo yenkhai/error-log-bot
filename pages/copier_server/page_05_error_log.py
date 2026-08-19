@@ -33,8 +33,9 @@ class ErrorLogChecker(BaseChecker):
         self.log_station_header("第05站 Error Log", menu_id="apy_b0i23text")
         try:
             # [步骤 1] 导航切入 Error Log 页面
-            self.navigate_to_menu("Error Log", menu_id="apy_b0i23text", section="Copier", wait_seconds=3.5)
+            self.navigate_to_menu("Error Log", menu_id="apy_b0i23text", section="Copier")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 通过关键词 'Server' 和 'Total' 精准定位并解析表格
             error_data = self.driver.execute_script("""
                 var result = {

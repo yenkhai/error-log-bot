@@ -32,8 +32,8 @@ class InfoRobotMonitorChecker(BaseChecker):
         self.log_station_header("第09站 Info Robot Monitor", menu_id="apy_b0i27text")
         try:
             # [步骤 1] 导航切入 Info Robot Monitor 页面
-            self.navigate_to_menu("Info Robot Monitor", menu_id="apy_b0i27text", section="Copier", wait_seconds=3.5)
-
+            self.navigate_to_menu("Info Robot Monitor", menu_id="apy_b0i27text", section="Copier")          
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 精准解析 Info Robot Monitor 表格
             # 表格列: Robot ID | Details | Robot Interval | TimeStamp
             # 特别注意: 同时检测每行 TimeStamp 单元格是否呈红色背景（长时间未运行的 Robot）

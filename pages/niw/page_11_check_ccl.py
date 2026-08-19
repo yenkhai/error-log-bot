@@ -28,8 +28,9 @@ class CheckCCLChecker(BaseChecker):
         self.log_station_header("第11站 Check CCL", menu_id="apy_b0i13text")
         try:
             # [步骤 2] 导航切入 Check CCL 页面，缓冲等待 3.5 秒让左右两大表格完整渲染
-            self.navigate_to_menu("Check CCL", menu_id="apy_b0i13text", section="NIW", wait_seconds=15)
+            self.navigate_to_menu("Check CCL", menu_id="apy_b0i13text", section="NIW")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 3] JavaScript 脚本抓取左右两大 CCL 板块
             p11_data = self.driver.execute_script("""
                 var result = {

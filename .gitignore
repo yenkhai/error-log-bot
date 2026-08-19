@@ -2,20 +2,27 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyo
 
-# PyInstaller
+# Build & PyInstaller
 build/
 dist/
 *.spec
 
-# Virtual Environment
+# HTML Snapshots & Temp files
+snapshots/
+*.html
+
+# Logs & Local Output
+logs/
+*.log
+
+# Windows & OS
+.DS_Store
+Thumbs.db
+*.lnk
+
+# Environment
 venv/
 env/
 .env
-
-# Configuration (Optional: ignore config if it contains passwords)
-# config.json 
-
-# OS generated files
-.DS_Store
-Thumbs.db

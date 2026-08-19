@@ -36,8 +36,9 @@ class CopierChecker(BaseChecker):
         self.log_station_header("第01站 Copier", menu_id="apy_b0i19text")
         try:
             # [步骤 2] 导航切入 Copier 页面 (section="Copier" 自动切换 Copier & Server 选项卡)
-            self.navigate_to_menu("Copier", menu_id="apy_b0i19text", section="Copier", wait_seconds=4)
+            self.navigate_to_menu("Copier", menu_id="apy_b0i19text", section="Copier")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 3] 获取页面内所有 iframe 子窗口列表
             iframes = self.driver.find_elements("tag name", "iframe")
             # 过滤掉 idx=0 的 f_popup 弹窗 frame，只保留公司监控 frame (idx 1~20)

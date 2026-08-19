@@ -40,9 +40,9 @@ class ForecastChecker(BaseChecker):
         self.log_station_header("第10站 Forecast", menu_id="apy_b0i11text")
         try:
             # [步骤 2] 导航切入 Forecast 页面
-            # wait_seconds=10: 缓冲等待 10 秒，保证页面的 AJAX 数据完全加载渲染完毕
-            self.navigate_to_menu("Forecast", menu_id="apy_b0i11text", section="NIW", wait_seconds=10)
+            self.navigate_to_menu("Forecast", menu_id="apy_b0i11text", section="NIW")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 3] 全局注入抗弹窗 Hook (拦截浏览器的 Confirm / Alert 询问框)
             # 作用: 防止点击 Patch 按钮时弹出的 "Confirm generate report?" 阻塞程序运行
             self.driver.execute_script("""

@@ -76,25 +76,48 @@ class ErrorLogScraperService:
             self.log(f"[WARN] 读取断点进度失败: {e}")
 
     def login_and_navigate(self, username, password):
-        """执行后台登录并自动跳转至 Error Log 页面"""
+        """执行后台登录并自动跳转至 Error Log 页面（兼容复用 Checkpoint 已开启的浏览器）"""
         self.log(f"[START] 获取浏览器实例... 账号: {username}")
         try:
             # 统一使用 BrowserManager 获取浏览器，共享免登录状态！
             self.driver = BrowserManager.get_driver(user=username, pwd=password)
             
-            self.log("正在寻找菜单...")
-            WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "frameset")))
-            self.driver.switch_to.default_content()
-            
+            # 先无条件切回顶层，确保不会卡在某个 iframe 里
             try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+
+            # 检查当前页面是否已经在系统内（frameset 存在说明已登录）
+            has_frameset = len(self.driver.find_elements(By.TAG_NAME, "frameset")) > 0
+            has_frames = len(self.driver.find_elements(By.TAG_NAME, "frame")) > 0 or \
+                         len(self.driver.find_elements(By.TAG_NAME, "iframe")) > 0
+
+            if not has_frameset and not has_frames:
+                # 浏览器可能不在系统页面内，尝试导航到登录页
+                self.log("[NAVIGATE] 浏览器未在系统页面，正在导航...")
+                auth_url = self.login_url.replace("http://", f"http://{self.auth_user}:{self.auth_pass}@")
+                self.driver.get(auth_url)
+                BrowserManager.auto_fill_login(self.driver, username, password)
+                time.sleep(2)
+                self.driver.switch_to.default_content()
+
+            # 切入菜单 Frame 并点击 Copier & Server -> Error Log
+            self.log("正在寻找菜单...")
+            try:
+                self.driver.switch_to.default_content()
                 self.driver.switch_to.frame(0)
+                
+                # 先点击 Copier & Server 分区选项卡
                 menu = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Copier & Server')]"))
                 )
                 self.driver.execute_script("arguments[0].click();", menu)
+                time.sleep(0.5)
             except Exception:
                 self.log(f"⚠️ 菜单点击遇到小问题 (尝试继续)")
 
+            # 点击 Error Log 链接
             self.log("正在寻找 Error Log 链接...")
             log_link = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, "//a[contains(text(), 'Error Log')]"))
@@ -102,6 +125,7 @@ class ErrorLogScraperService:
             self.driver.execute_script("arguments[0].click();", log_link)
             self.log("🖱️ 已点击 Error Log")
             
+            # 切入 mainFrame 等待列表页加载
             self.log("等待列表页加载...")
             self.driver.switch_to.default_content()
             WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
@@ -258,8 +282,13 @@ class ErrorLogScraperService:
                 i += 1
 
         self.log(f"\n🎉 全部完成！文件: {self.output_file}")
+        # 不执行 driver.quit()！浏览器是与 Checkpoint 共享的，
+        # 只需切回系统主页，方便下一个功能模块无缝继续使用。
         if self.driver:
-            try: self.driver.quit()
-            except: pass
+            try:
+                self.driver.switch_to.default_content()
+                self.driver.get(f"http://{self.auth_user}:{self.auth_pass}@10.16.250.9/ubah/index.php?p=main_system")
+            except Exception:
+                pass
         self.success = True
         return True

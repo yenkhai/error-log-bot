@@ -28,7 +28,7 @@ class CalculateBetslipsChecker(BaseChecker):
         self.log_station_header("第5站 Calculate Betslips", menu_id="apy_b0i6text")
         try:
             # 1. 导航切入 Calculate Betslips 菜单
-            self.navigate_to_menu("Calculate Betslips", menu_id="apy_b0i6text", section="NIW", wait_seconds=3)
+            self.navigate_to_menu("Calculate Betslips", menu_id="apy_b0i6text", section="NIW")
 
             # 2. 获取下拉框中所有的公司列表 (RCM 与 LRCM)
             companies = self.driver.execute_script("""

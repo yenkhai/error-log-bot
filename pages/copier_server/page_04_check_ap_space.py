@@ -31,8 +31,9 @@ class CheckAPSpaceChecker(BaseChecker):
         self.log_station_header("第04站 Check AP Space", menu_id="apy_b0i22text")
         try:
             # [步骤 1] 导航切入 Check AP Space 页面
-            self.navigate_to_menu("Check AP Space", menu_id="apy_b0i22text", section="Copier", wait_seconds=3.5)
+            self.navigate_to_menu("Check AP Space", menu_id="apy_b0i22text", section="Copier")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 精准解析磁盘空间表格
             # 表格格式: IP | Size | Used | Avail | Use%
             space_data = self.driver.execute_script("""

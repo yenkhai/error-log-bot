@@ -26,8 +26,9 @@ class OneWalletPendingChecker(BaseChecker):
         self.log_station_header("第15站 1 Wallet Pending", menu_id="apy_b0i17text", page_key="niw_15")
         try:
             # 1. 导航切入 1 Wallet Pending 页面 (等待 4 秒加载)
-            self.navigate_to_menu("1 Wallet Pending", menu_id="apy_b0i17text", section="NIW", wait_seconds=4)
+            self.navigate_to_menu("1 Wallet Pending", menu_id="apy_b0i17text", section="NIW")
 
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # 2. 核心 JavaScript 脚本：同时提取左右两侧全部表格数据
             parsed_data = self.driver.execute_script("""
                 var result = {

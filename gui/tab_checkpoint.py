@@ -132,6 +132,16 @@ class CheckpointTab(ctk.CTkFrame):
         self.niw_vars    = [ctk.BooleanVar(value=True) for _ in range(15)]
         self.copier_vars = [ctk.BooleanVar(value=True) for _ in range(9)]
 
+        # 每小时自动巡检控制变量
+        self.hourly_auto_var = ctk.BooleanVar(value=False)
+        self.hourly_interval_seconds = 3600  # 默认 3600 秒 (1小时)
+        self.next_run_timestamp = None
+        self.hourly_timer_id = None
+        self.hourly_cycle_count = 0
+
+        # 异常声音报警开关 (默认开启)
+        self.sound_alert_var = ctk.BooleanVar(value=True)
+
         self.build_ui()
 
     # ─────────────────────────────────────────────────────────────────
@@ -144,7 +154,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ▶ 运行全量 (NIW → Copier 依次执行)
         self.btn_run_all = ctk.CTkButton(
-            top_frame, text="▶ 全量巡检", command=self.start_full_thread,
+            top_frame, text="Check All", command=self.start_full_thread,
             fg_color="#1f538d", hover_color="#14375e",
             font=ctk.CTkFont(weight="bold"), width=105
         )
@@ -152,7 +162,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ▶ 仅运行 NIW
         self.btn_run_niw = ctk.CTkButton(
-            top_frame, text="▶ 仅 NIW", command=self.start_niw_only_thread,
+            top_frame, text="Check NIW", command=self.start_niw_only_thread,
             fg_color="#16a085", hover_color="#117864",
             font=ctk.CTkFont(weight="bold"), width=95
         )
@@ -160,7 +170,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ▶ 仅运行 Copier
         self.btn_run_copier = ctk.CTkButton(
-            top_frame, text="▶ 仅 Copier", command=self.start_copier_only_thread,
+            top_frame, text="Check Copier", command=self.start_copier_only_thread,
             fg_color="#27ae60", hover_color="#1e8449",
             font=ctk.CTkFont(weight="bold"), width=100
         )
@@ -168,7 +178,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ⏹ 停止（跑完当前页停止）
         self.btn_stop = ctk.CTkButton(
-            top_frame, text="⏹ 停止", command=self.request_stop,
+            top_frame, text="Stop", command=self.request_stop,
             fg_color="#c0392b", hover_color="#962d22",
             font=ctk.CTkFont(weight="bold"), width=75
         )
@@ -176,7 +186,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ⏯ 断点续传
         self.btn_resume = ctk.CTkButton(
-            top_frame, text="⏯️ 续传", command=self.start_resume_thread,
+            top_frame, text="Resume", command=self.start_resume_thread,
             fg_color="#e67e22", hover_color="#d35400",
             font=ctk.CTkFont(weight="bold"), width=85
         )
@@ -184,23 +194,15 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ⏭ 跳过打勾
         self.btn_skip = ctk.CTkButton(
-            top_frame, text="⏭️ 跳过", command=self.start_skip_and_checkpoint_thread,
+            top_frame, text="skip", command=self.start_skip_and_checkpoint_thread,
             fg_color="#8e44ad", hover_color="#732d91",
             font=ctk.CTkFont(weight="bold"), width=85
         )
         self.btn_skip.pack(side="left", padx=3, pady=5)
 
-        # 📊 HTML 仪表盘
-        self.btn_open_dashboard = ctk.CTkButton(
-            top_frame, text="📊 仪表盘", command=self.open_dashboard,
-            fg_color="#0C63AF", hover_color="#1e88e5",
-            font=ctk.CTkFont(weight="bold"), width=90
-        )
-        self.btn_open_dashboard.pack(side="left", padx=3, pady=5)
-
         # 🔽 折叠/展开
         self.btn_toggle_matrix = ctk.CTkButton(
-            top_frame, text="🔽 折叠", command=self.toggle_matrix_panel,
+            top_frame, text="Collapse", command=self.toggle_matrix_panel,
             fg_color="#34495e", hover_color="#2c3e50",
             font=ctk.CTkFont(weight="bold"), width=85
         )
@@ -208,15 +210,47 @@ class CheckpointTab(ctk.CTkFrame):
 
         # 🗑 清空日志
         self.btn_clear = ctk.CTkButton(
-            top_frame, text="🗑️ 清空", command=self.clear_log, width=65
+            top_frame, text="Clear", command=self.clear_log, width=65
         )
         self.btn_clear.pack(side="right", padx=3, pady=5)
 
         # 📁 打开日志文件夹
         self.btn_open_logs = ctk.CTkButton(
-            top_frame, text="📁 日志", command=self.open_log_folder, width=65
+            top_frame, text="Logs", command=self.open_log_folder, width=65
         )
         self.btn_open_logs.pack(side="right", padx=3, pady=5)
+
+        # 1.5 定时自动巡检调度控制栏 (Hourly Auto-Run Scheduler)
+        schedule_frame = ctk.CTkFrame(self, fg_color="#1a202c", corner_radius=6)
+        schedule_frame.pack(fill="x", padx=10, pady=(2, 4))
+
+        self.switch_hourly = ctk.CTkSwitch(
+            schedule_frame, text="⏰ 定时自动巡检", variable=self.hourly_auto_var,
+            command=self.toggle_hourly_auto, font=ctk.CTkFont(weight="bold", size=12),
+            progress_color="#2ecc71"
+        )
+        self.switch_hourly.pack(side="left", padx=(10, 8), pady=4)
+
+        self.opt_interval = ctk.CTkOptionMenu(
+            schedule_frame, values=["每 60 分钟 (1小时)", "每 30 分钟", "每 120 分钟 (2小时)"],
+            width=140, height=24, font=ctk.CTkFont(size=11),
+            command=self._on_interval_changed
+        )
+        self.opt_interval.set("每 60 分钟 (1小时)")
+        self.opt_interval.pack(side="left", padx=5, pady=4)
+
+        self.lbl_schedule_status = ctk.CTkLabel(
+            schedule_frame, text="[状态] ⏸️ 未开启自动巡检",
+            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            text_color="#8892B0"
+        )
+        self.lbl_schedule_status.pack(side="left", padx=(15, 10), pady=4)
+
+        self.switch_sound = ctk.CTkSwitch(
+            schedule_frame, text="🔔 报警音", variable=self.sound_alert_var,
+            font=ctk.CTkFont(weight="bold", size=11), progress_color="#e74c3c", width=65
+        )
+        self.switch_sound.pack(side="right", padx=(5, 12), pady=4)
 
         # 2. 关卡自定义勾选矩阵
         self.select_frame = ctk.CTkFrame(self)
@@ -348,14 +382,6 @@ class CheckpointTab(ctk.CTkFrame):
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
 
-    def open_dashboard(self):
-        try:
-            from core.report_manager import ReportManager
-            ReportManager.open_dashboard()
-            self.log("[REPORT] 已成功打开 HTML 巡检仪表盘！")
-        except Exception as e:
-            self.log(f"[WARN] 打开仪表盘提示: {e}")
-
     def open_log_folder(self):
         """打开桌面 CheckpointLogs 文件夹"""
         import os, subprocess
@@ -367,6 +393,115 @@ class CheckpointTab(ctk.CTkFrame):
         except Exception as e:
             self.log(f"[WARN] 打开文件夹失败: {e}")
 
+    # ─────────────────────────────────────────────────────────────────
+    #  定时自动巡检调度方法 (Hourly Auto-Run Engine)
+    # ─────────────────────────────────────────────────────────────────
+    def _on_interval_changed(self, choice: str):
+        """周期下拉框选择事件"""
+        if "30" in choice:
+            self.hourly_interval_seconds = 1800
+        elif "120" in choice:
+            self.hourly_interval_seconds = 7200
+        else:
+            self.hourly_interval_seconds = 3600
+        
+        # 若当前正在等待倒计时中，重新计算下一次执行目标时间
+        if self.hourly_auto_var.get() and self.next_run_timestamp is not None:
+            self.next_run_timestamp = time.time() + self.hourly_interval_seconds
+            self.log(f"[TIMER] ⚙️ 巡检周期已切换为: {choice}")
+
+    def toggle_hourly_auto(self):
+        """开启 / 关闭 定时自动巡检开关 (开启后进入倒计时，不立即触发)"""
+        enabled = self.hourly_auto_var.get()
+        if enabled:
+            self.hourly_cycle_count = 0
+            # 开启时直接从当前时间开始计算下次执行时间 (例如 60 分钟后)
+            self.next_run_timestamp = time.time() + self.hourly_interval_seconds
+            mins = self.hourly_interval_seconds // 60
+            target_time = time.strftime("%H:%M:%S", time.localtime(self.next_run_timestamp))
+            
+            self.log("══════════════════════════════════════════════════")
+            self.log(f"  ⏰ 已开启定时自动巡检！(周期: 每 {mins} 分钟)")
+            self.log(f"  ⏳ 倒计时开始：将在 {target_time} (约 {mins} 分钟后) 自动执行第 1 轮巡检")
+            self.log("══════════════════════════════════════════════════")
+            
+            if self.hourly_timer_id is not None:
+                self.after_cancel(self.hourly_timer_id)
+            self._hourly_tick()
+        else:
+            self.log("[TIMER] ⏹ 已关闭定时自动巡检模式。")
+            self.next_run_timestamp = None
+            self.lbl_schedule_status.configure(text="[状态] ⏸️ 未开启自动巡检", text_color="#8892B0")
+            if self.hourly_timer_id is not None:
+                self.after_cancel(self.hourly_timer_id)
+                self.hourly_timer_id = None
+
+    def _hourly_tick(self):
+        """每秒驱动一次的倒计时调度引擎"""
+        if not self.hourly_auto_var.get():
+            return
+
+        now = time.time()
+        if self.is_running:
+            # 正在运行巡检任务
+            self.lbl_schedule_status.configure(
+                text=f"[状态] 🚀 正在执行第 {self.hourly_cycle_count + 1} 轮巡检中...",
+                text_color="#50FA7B"
+            )
+            # 运行期间清空 next_run_timestamp，等全量通关后再精确设定下一次时间
+            self.next_run_timestamp = None
+        else:
+            # 当前未在运行
+            if self.last_failed_type is not None:
+                # 存在 Error 中断，暂停下一轮，保护现场等待人工介入
+                self.lbl_schedule_status.configure(
+                    text=f"[状态] ⚠️ 上一轮在 {self.last_failed_type} 遇错中断！已暂停，等待处理",
+                    text_color="#FF4D4D"
+                )
+            else:
+                # 正常空闲状态
+                if self.next_run_timestamp is None:
+                    # 刚刚完成一轮，计算下一次执行目标时间戳
+                    self.hourly_cycle_count += 1
+                    self.next_run_timestamp = now + self.hourly_interval_seconds
+
+                diff = int(self.next_run_timestamp - now)
+                if diff <= 0:
+                    # 倒计时归零，自动唤醒触发下一轮全量巡检
+                    self.next_run_timestamp = None
+                    if not self._check_cross_tab_busy():
+                        self.log(f"\n[TIMER] ⏰ 倒计时结束，自动唤醒执行第 {self.hourly_cycle_count + 1} 轮全量巡检！")
+                        self.start_full_thread()
+                    else:
+                        self.log("[TIMER] ⚠️ 检测到 Error Log 工具正在运行，延后 30 秒再次尝试唤醒巡检...")
+                        self.next_run_timestamp = now + 30
+                else:
+                    mins = diff // 60
+                    secs = diff % 60
+                    target_time = time.strftime("%H:%M:%S", time.localtime(self.next_run_timestamp))
+                    self.lbl_schedule_status.configure(
+                        text=f"[状态] ⏳ 下次巡检: {target_time} (还剩 {mins}分{secs:02d}秒) | 已完成: {self.hourly_cycle_count}轮",
+                        text_color="#FFB86C"
+                    )
+
+        # 关键：每隔 1 秒递归调度下一跳，驱动倒计时动态减少与自动触发
+        self.hourly_timer_id = self.after(1000, self._hourly_tick)
+
+    def play_error_sound(self):
+        """异常发生时触发 Windows 蜂鸣报警音 (后台守护线程执行，不阻塞 UI)"""
+        if not self.sound_alert_var.get():
+            return
+        def _beep():
+            try:
+                import winsound
+                # 连续播放 3 声清晰的高频警报音 (1800Hz, 200ms)
+                for _ in range(3):
+                    winsound.Beep(1800, 200)
+                    time.sleep(0.08)
+            except Exception:
+                pass
+        threading.Thread(target=_beep, daemon=True).start()
+
     def request_stop(self):
         """用户点击停止 — 设置标志，当前页跑完后停止"""
         if not self.is_running:
@@ -374,6 +509,8 @@ class CheckpointTab(ctk.CTkFrame):
             return
         self.stop_requested = True
         self.log("[STOP] ⏹ 已收到停止指令！将在当前页面完成后停止，请稍候...")
+        if self.hourly_auto_var.get():
+            self.log("[STOP] 提示: 定时巡检仍处于开启状态；如需完全停止定时，请关闭上方【⏰ 定时自动巡检】开关。")
 
     def update_button_states(self):
         """
@@ -625,6 +762,7 @@ class CheckpointTab(ctk.CTkFrame):
                         self.log(f"\n[INTERRUPT] ❌ {name} 检测到异常，巡检中断！")
                         self.log("  → 点击 [⏯ 断点续传] 重试当前站")
                         self.log("  → 点击 [⏭ 跳过打勾] 强行通关当前站进入下一站")
+                        self.play_error_sound()
                         interrupted = True
                         break
 
@@ -669,6 +807,7 @@ class CheckpointTab(ctk.CTkFrame):
                         self.log(f"\n[INTERRUPT] ❌ {name} 检测到异常，巡检中断！")
                         self.log("  → 点击 [⏯ 断点续传] 重试当前站")
                         self.log("  → 点击 [⏭ 跳过打勾] 强行通关当前站进入下一站")
+                        self.play_error_sound()
                         interrupted = True
                         break
 
@@ -683,6 +822,13 @@ class CheckpointTab(ctk.CTkFrame):
                 self.log("\n══════════════════════════════════════════════════")
                 self.log("  🎉 恭喜！巡检关卡全部顺畅通关！")
                 self.log("══════════════════════════════════════════════════")
+                # 仅在全部成功通关时，才自动跳回 NIW 第1站 Pending Wager
+                try:
+                    checker = BaseChecker(driver, self.log)
+                    checker.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW", wait_seconds=2)
+                    self.log("[NAVIGATE] ✅ 巡检全部顺利完成，已自动跳回 Pending Wager (NIW 第1站) 页面")
+                except Exception:
+                    pass
 
             # 更新 INDEX.txt 汇总
             if self._run_results:
@@ -694,6 +840,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         except Exception as e:
             self.log(f"\n[ERROR] 巡检过程出现异常: {e}\n{traceback.format_exc()}")
+            self.play_error_sound()
         finally:
             self.after(0, self.reset_buttons)
 
@@ -719,6 +866,11 @@ class CheckpointTab(ctk.CTkFrame):
                     self.run_full_pipeline(niw_start=15, copier_start=next_index, full=False)
                 else:
                     self.log("[COMPLETE] Copier & Server 全部关卡已巡检完毕！")
+                    try:
+                        checker.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW", wait_seconds=2)
+                        self.log("[NAVIGATE] ✅ 已自动跳回 Pending Wager (NIW 第1站) 页面")
+                    except Exception:
+                        pass
             else:
                 if next_index < 15:
                     _continuing_to_next = True
@@ -731,6 +883,11 @@ class CheckpointTab(ctk.CTkFrame):
                         self.run_full_pipeline(niw_start=15, copier_start=0, full=True)
                     else:
                         self.log("[COMPLETE] NIW 全部关卡已巡检完毕！")
+                        try:
+                            checker.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW", wait_seconds=2)
+                            self.log("[NAVIGATE] ✅ 已自动跳回 Pending Wager (NIW 第1站) 页面")
+                        except Exception:
+                            pass
 
         except Exception as e:
             self.log(f"[ERROR] 强制跳过过程异常: {e}\n{traceback.format_exc()}")

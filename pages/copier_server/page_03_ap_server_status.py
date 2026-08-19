@@ -28,8 +28,8 @@ class APServerStatusChecker(BaseChecker):
         self.log_station_header("第03站 AP Server Status", menu_id="apy_b0i21text")
         try:
             # [步骤 1] 导航切入 AP Server Status 页面
-            self.navigate_to_menu("AP Server Status", menu_id="apy_b0i21text", section="Copier", wait_seconds=3.5)
-
+            self.navigate_to_menu("AP Server Status", menu_id="apy_b0i21text", section="Copier")
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 解析页面中所有 AP 服务器 IP 地址
             # AP 服务器 IP 格式: 10.xxx.xxx.xxx，通过正则匹配文本节点提取
             ap_data = self.driver.execute_script("""

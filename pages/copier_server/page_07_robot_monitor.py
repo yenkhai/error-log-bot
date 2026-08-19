@@ -30,8 +30,8 @@ class RobotMonitorChecker(BaseChecker):
         self.log_station_header("第07站 Robot Monitor", menu_id="apy_b0i25text")
         try:
             # [步骤 1] 导航切入 Robot Monitor 页面
-            self.navigate_to_menu("Robot Monitor", menu_id="apy_b0i25text", section="Copier", wait_seconds=3.5)
-
+            self.navigate_to_menu("Robot Monitor", menu_id="apy_b0i25text", section="Copier")
+            self.wait_for_page_loaded(seconds=2, max_wait=30)
             # [步骤 2] 使用 JavaScript 解析 Robot Monitor 表格
             # 表格列: Robot ID | Details | TimeStamp
             robot_data = self.driver.execute_script("""
