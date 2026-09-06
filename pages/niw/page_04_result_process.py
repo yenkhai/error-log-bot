@@ -17,8 +17,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class ResultProcessChecker(BaseChecker):
     def check(self) -> bool:
@@ -36,6 +36,7 @@ class ResultProcessChecker(BaseChecker):
                     resultActionDetails: [],
                     promotionActionDetails: [],
                     missingDetails: [],
+                    rawRows: [],
                     errorCount: 0
                 };
 
@@ -59,9 +60,8 @@ class ResultProcessChecker(BaseChecker):
                     var hasRed = isRed(bg) || isRed(fg);
                     var isSuccessText = (txt === "success" || txt === "");
                     
-                    // 若文本为 fail/missing/error 或命中红底/红字，判定为异常
                     if (!isSuccessText || hasRed || txt.indexOf("error") !== -1 || txt.indexOf("fail") !== -1) {
-                        return true; // isError = true
+                        return true;
                     }
                     return false;
                 }
@@ -83,10 +83,19 @@ class ResultProcessChecker(BaseChecker):
                                 if (sat && sat !== "Satellite" && sat.indexOf("Event Score Process") === -1 && d1.indexOf("/") === -1) {
                                     var isErr1 = checkSuccessCell(tds[1]);
                                     var isErr2 = checkSuccessCell(tds[2]);
+                                    var isErr = (isErr1 || isErr2);
 
-                                    if (isErr1 || isErr2) result.errorCount++;
-                                    var tag = (isErr1 || isErr2) ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    if (isErr) result.errorCount++;
+                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.eventScoreDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
+                                    result.rawRows.push({
+                                        section: "Event Score Process",
+                                        satellite: sat,
+                                        d1: d1,
+                                        d2: d2,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         }
@@ -104,10 +113,19 @@ class ResultProcessChecker(BaseChecker):
                                 if (sat && sat !== "Satellite" && sat.indexOf("Syn Event") === -1 && d1.indexOf("/") === -1) {
                                     var isErr1 = checkSuccessCell(tds[1]);
                                     var isErr2 = checkSuccessCell(tds[2]);
+                                    var isErr = (isErr1 || isErr2);
 
-                                    if (isErr1 || isErr2) result.errorCount++;
-                                    var tag = (isErr1 || isErr2) ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    if (isErr) result.errorCount++;
+                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.synEventDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
+                                    result.rawRows.push({
+                                        section: "Syn Event",
+                                        satellite: sat,
+                                        d1: d1,
+                                        d2: d2,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         }
@@ -125,10 +143,19 @@ class ResultProcessChecker(BaseChecker):
                                 if (sat && sat !== "Satellite" && sat.indexOf("Result Action") === -1 && d1.indexOf("/") === -1) {
                                     var isErr1 = checkSuccessCell(tds[1]);
                                     var isErr2 = checkSuccessCell(tds[2]);
+                                    var isErr = (isErr1 || isErr2);
 
-                                    if (isErr1 || isErr2) result.errorCount++;
-                                    var tag = (isErr1 || isErr2) ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    if (isErr) result.errorCount++;
+                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.resultActionDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
+                                    result.rawRows.push({
+                                        section: "Result Action",
+                                        satellite: sat,
+                                        d1: d1,
+                                        d2: d2,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         }
@@ -146,10 +173,19 @@ class ResultProcessChecker(BaseChecker):
                                 if (sat && sat !== "Satellite" && sat.indexOf("Promotion Action") === -1 && d1.indexOf("/") === -1) {
                                     var isErr1 = checkSuccessCell(tds[1]);
                                     var isErr2 = checkSuccessCell(tds[2]);
+                                    var isErr = (isErr1 || isErr2);
 
-                                    if (isErr1 || isErr2) result.errorCount++;
-                                    var tag = (isErr1 || isErr2) ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    if (isErr) result.errorCount++;
+                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.promotionActionDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
+                                    result.rawRows.push({
+                                        section: "Promotion Action",
+                                        satellite: sat,
+                                        d1: d1,
+                                        d2: d2,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         }
@@ -166,10 +202,19 @@ class ResultProcessChecker(BaseChecker):
                                 if (d1 && d1 !== "Satellite Score Missing" && d1.indexOf("/") === -1) {
                                     var isErr1 = checkSuccessCell(tds[0]);
                                     var isErr2 = checkSuccessCell(tds[1]);
+                                    var isErr = (isErr1 || isErr2);
 
-                                    if (isErr1 || isErr2) result.errorCount++;
-                                    var tag = (isErr1 || isErr2) ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    if (isErr) result.errorCount++;
+                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.missingDetails.push("Score Missing Check -> D1: " + d1 + ", D2: " + d2 + tag);
+                                    result.rawRows.push({
+                                        section: "Satellite Score Missing",
+                                        satellite: "Missing Check",
+                                        d1: d1,
+                                        d2: d2,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         }
@@ -184,6 +229,7 @@ class ResultProcessChecker(BaseChecker):
             result_details = p4_data.get("resultActionDetails", [])
             promo_details = p4_data.get("promotionActionDetails", [])
             missing_details = p4_data.get("missingDetails", [])
+            raw_rows = p4_data.get("rawRows", [])
             
             error_count = p4_data.get("errorCount", 0)
             total_items = len(event_details) + len(syn_details) + len(result_details) + len(promo_details) + len(missing_details)
@@ -216,18 +262,54 @@ class ResultProcessChecker(BaseChecker):
 
             self.log_data_summary(all_summary)
 
+            table_headers = ["Section", "Satellite", "Date 1 (D1)", "Date 2 (D2)", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["section"]),
+                    CheckpointStore.make_cell(r["satellite"]),
+                    CheckpointStore.make_cell(r["d1"], bg="red" if "fail" in r["d1"].lower() or "err" in r["d1"].lower() else "green"),
+                    CheckpointStore.make_cell(r["d2"], bg="red" if "fail" in r["d2"].lower() or "err" in r["d2"].lower() else "green"),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # 4. 判定结论
             if error_count > 0:
                 self.log(f"[Error] Result Process 检测到 {error_count} 项非 success 或红底异常，阻断 Checkpoint！")
                 self.log_check_result(False, f"Result Process 存在 {error_count} 项状态异常，阻断 Checkpoint。")
+                CheckpointStore.save(
+                    page_key="niw_04",
+                    title="Result Process",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"{error_count} 项异常 (共 {len(raw_rows)} 项)"
+                )
                 return False
             else:
                 self.log_check_result(True, "Result Process 5 大表格状态全部为 success 且绿底正常，巡检通过！")
 
             # 5. 解封并点击 Checkpoint 按钮
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_04",
+                title="Result Process",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全部 {len(raw_rows)} 项节点状态全部绿底 success"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Result Process 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_04",
+                title="Result Process",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

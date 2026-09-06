@@ -22,8 +22,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class DBServerStatusChecker(BaseChecker):
@@ -119,26 +119,64 @@ class DBServerStatusChecker(BaseChecker):
 
             # [步骤 4] scan_red_cells() 全页红底/红字深度扫描
             red_items = self.scan_red_cells()
+            
+            headers = ["No.", "Host", "Remarks", "Th_connected", "ratio", "Partition Event", "Function"]
+            rows = []
+            for srv in servers:
+                rows.append([
+                    srv.get('no', ''),
+                    srv.get('host', ''),
+                    srv.get('remarks', ''),
+                    srv.get('thConnected', ''),
+                    srv.get('ratio', ''),
+                    srv.get('partitionEvent', ''),
+                    srv.get('function', '')
+                ])
+            if red_items:
+                rows.append(["-", "RED NODES FOUND", str(len(red_items)), "", "", "", ""])
+                for item in red_items:
+                    rows.append(["-", CheckpointStore.make_cell(str(item), "red"), "", "", "", "", ""])
 
             if red_items:
                 self.log(f"[Error] DB Server Status 检测到 {len(red_items)} 个红色异常节点，触发 Tier 1 致命阻断！")
                 for item in red_items:
                     self.log(f"   [RED NODE] {item}")
-                self.log_check_result(
-                    False,
-                    f"DB Server Status 存在 {len(red_items)} 个红色异常节点，Tier 1 强阻断 Checkpoint！"
+                
+                msg = f"DB Server Status 存在 {len(red_items)} 个红色异常节点，Tier 1 强阻断 Checkpoint！"
+                self.log_check_result(False, msg)
+                CheckpointStore.save(
+                    page_key="copier_02",
+                    title="DB Server Status",
+                    status=False,
+                    headers=headers,
+                    rows=rows,
+                    summary=msg
                 )
                 return False
             else:
-                self.log_check_result(
-                    True,
-                    f"DB Server Status 全部 {total_count} 个节点无红色异常，巡检通过！"
-                )
+                msg = f"DB Server Status 全部 {total_count} 个节点无红色异常，巡检通过！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_02",
+                title="DB Server Status",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 5] 巡检通过，点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"DB Server Status 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_02",
+                title="DB Server Status",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

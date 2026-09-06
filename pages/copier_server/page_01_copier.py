@@ -29,6 +29,7 @@
 
 import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class CopierChecker(BaseChecker):
     def check(self) -> bool:
@@ -53,6 +54,7 @@ class CopierChecker(BaseChecker):
 
             err_count = 0
             err_list = []
+            rows = []
 
             for frame in company_frames:
                 frame_id = frame.get_attribute("id") or "Unknown"
@@ -145,16 +147,27 @@ class CopierChecker(BaseChecker):
                         tag = f" [ERROR/Tier 1 强阻断: {', '.join(warn_parts)}]"
                     else:
                         tag = " [OK/正常]"
+                        
+                    bg_color = "red" if is_err else "green"
 
                     if found:
                         line = f"{comp_name}: Total Unsynch (Niw_w={niw_w}, Niw_winc={niw_winc}, Niw_wmulp={niw_wmulp}), Last Update={last_update}{tag}"
+                        rows.append([
+                            comp_name,
+                            CheckpointStore.make_cell(str(niw_w), bg_color),
+                            CheckpointStore.make_cell(str(niw_winc), bg_color),
+                            CheckpointStore.make_cell(str(niw_wmulp), bg_color),
+                            last_update
+                        ])
                     else:
                         line = f"{comp_name}: 无法读取 Total Unsynch 数据 (表格结构可能不同){tag}"
+                        rows.append([comp_name, "N/A", "N/A", "N/A", "N/A"])
 
                     summary_lines.append(f"   * {line}")
 
                 except Exception as fe:
                     summary_lines.append(f"   * {comp_name}: [ERR] 穿透异常: {fe}")
+                    rows.append([comp_name, "ERR", "ERR", "ERR", str(fe)])
                 finally:
                     # 4.3 切回 mainFrame 准备处理下一个公司 iframe
                     self.switch_to_main_frame()
@@ -163,16 +176,44 @@ class CopierChecker(BaseChecker):
             # [步骤 5] 打印全量明细摘要
             self.log_data_summary(summary_lines)
 
+            headers = ["Company", "Niw_w", "Niw_winc", "Niw_wmulp", "Last Update"]
+
             # [步骤 6] Tier 1 报错阻断判定
             if err_count > 0:
-                self.log_check_result(False, f"Copier 巡检发现 Tier 1 致命异常: {err_count} 家公司 Total Unsynch 非零 ({', '.join(err_list)})，强阻断 Checkpoint！")
+                msg = f"Copier 巡检发现 Tier 1 致命异常: {err_count} 家公司 Total Unsynch 非零 ({', '.join(err_list)})，强阻断 Checkpoint！"
+                self.log_check_result(False, msg)
+                CheckpointStore.save(
+                    page_key="copier_01",
+                    title="Copier",
+                    status=False,
+                    headers=headers,
+                    rows=rows,
+                    summary=msg
+                )
                 return False
             else:
-                self.log_check_result(True, f"Copier 全部 {len(company_frames)} 家公司 Total Unsynch 均为 0，Copier Monitor 运行完全正常！")
+                msg = f"Copier 全部 {len(company_frames)} 家公司 Total Unsynch 均为 0，Copier Monitor 运行完全正常！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_01",
+                title="Copier",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 7] Copier 页面本身没有 Checkpoint 按钮，巡检通过直接返回 True 即可
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Copier 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_01",
+                title="Copier",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

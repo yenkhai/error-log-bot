@@ -15,8 +15,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class WsumSportChecker(BaseChecker):
     def check(self) -> bool:
@@ -32,6 +32,7 @@ class WsumSportChecker(BaseChecker):
                 var result = {
                     category: "RCM",
                     rows: [],
+                    rawRows: [],
                     errCount: 0,
                     errList: []
                 };
@@ -72,6 +73,15 @@ class WsumSportChecker(BaseChecker):
 
                                     var line = com + " (" + type + "): Total Wsum = " + wsum + ", Total Betslips = " + betslips + ", Remark = " + remark + tag;
                                     result.rows.push(line);
+                                    result.rawRows.push({
+                                        company: com,
+                                        type: type,
+                                        wsum: wsum,
+                                        betslips: betslips,
+                                        remark: remark,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         });
@@ -83,6 +93,7 @@ class WsumSportChecker(BaseChecker):
 
             cat_name = p12_data.get("category", "RCM")
             rows = p12_data.get("rows", [])
+            raw_rows = p12_data.get("rawRows", [])
             err_count = p12_data.get("errCount", 0)
             err_list = p12_data.get("errList", [])
 
@@ -98,18 +109,55 @@ class WsumSportChecker(BaseChecker):
 
             self.log_data_summary(summary_lines)
 
+            table_headers = ["Company", "Type", "Total Wsum", "Total Betslips", "Remark", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["company"]),
+                    CheckpointStore.make_cell(r["type"]),
+                    CheckpointStore.make_cell(r["wsum"]),
+                    CheckpointStore.make_cell(r["betslips"]),
+                    CheckpointStore.make_cell(r["remark"], bg="red" if r.get("is_error") else "green"),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # [步骤 5] Tier 1 报错阻断判定
             # 只要存在 1 项 Remark 非 Correct，强阻断 Checkpoint
             if err_count > 0:
                 self.log_check_result(False, f"Wsum Sport 巡检发现 Tier 1 致命异常: 存在 {err_count} 项 Remark 非 Correct ({', '.join(err_list)})，强阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_12",
+                    title="Wsum Sport",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"Errors: {err_count}"
+                )
                 return False
             else:
                 self.log_check_result(True, "Wsum Sport 全部公司节点 Remark 均为 Correct，状态完全正常！")
 
             # [步骤 6] 解封并自动点击 Checkpoint
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_12",
+                title="Wsum Sport",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary="All remarks Correct"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Wsum Sport 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_12",
+                title="Wsum Sport",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

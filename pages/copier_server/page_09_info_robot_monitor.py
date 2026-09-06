@@ -23,8 +23,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class InfoRobotMonitorChecker(BaseChecker):
@@ -150,6 +150,9 @@ class InfoRobotMonitorChecker(BaseChecker):
             # [步骤 3] 无条件打印所有 Robot 状态（包含红色时间戳标注）
             summary_lines = ["【Info Robot Monitor 全量巡检数据明细】:"]
             summary_lines.append(f"--- [Robot 运行状态列表 (共 {total_count} 个)] ---")
+            
+            headers = ["Robot ID", "Details", "Interval", "TimeStamp"]
+            rows = []
 
             for robot in robots:
                 line = (
@@ -157,6 +160,14 @@ class InfoRobotMonitorChecker(BaseChecker):
                     f"Interval: {robot['interval']} | TimeStamp: {robot['timestamp']}{robot['tag']}"
                 )
                 summary_lines.append(f"   * {line}")
+                
+                bg = "red" if robot['hasRedTimestamp'] else "green"
+                rows.append([
+                    robot['robotId'],
+                    robot['details'],
+                    robot['interval'],
+                    CheckpointStore.make_cell(robot['timestamp'], bg)
+                ])
 
             if not robots:
                 summary_lines.append("   * (未捕获到任何 Robot 数据，请检查页面是否正常加载)")
@@ -170,26 +181,50 @@ class InfoRobotMonitorChecker(BaseChecker):
 
             # [步骤 4] scan_red_cells() 全页红底/红字深度扫描（双重确认）
             red_items = self.scan_red_cells()
+            
+            if red_items:
+                for item in red_items:
+                    rows.append([CheckpointStore.make_cell(str(item), "red"), "RED NODE", "-", "-"])
 
             if red_items:
                 self.log(f"[Error] Info Robot Monitor 检测到 {len(red_items)} 个红色异常节点（含红色时间戳），触发 Tier 1 致命阻断！")
                 for item in red_items:
                     self.log(f"   [RED NODE] {item}")
-                self.log_check_result(
-                    False,
-                    f"Info Robot Monitor 存在 {len(red_items)} 个红色异常节点（红色时间戳代表 Robot 长时间未运行），Tier 1 强阻断 Checkpoint！"
+                msg = f"Info Robot Monitor 存在 {len(red_items)} 个红色异常节点（红色时间戳代表 Robot 长时间未运行），Tier 1 强阻断 Checkpoint！"
+                self.log_check_result(False, msg)
+                CheckpointStore.save(
+                    page_key="copier_09",
+                    title="Info Robot Monitor",
+                    status=False,
+                    headers=headers,
+                    rows=rows,
+                    summary=msg
                 )
                 return False
             else:
-                self.log_check_result(
-                    True,
-                    f"Info Robot Monitor 全部 {total_count} 个 Robot 无红色异常，所有 Robot 运行正常，巡检通过！"
-                )
+                msg = f"Info Robot Monitor 全部 {total_count} 个 Robot 无红色异常，所有 Robot 运行正常，巡检通过！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_09",
+                title="Info Robot Monitor",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 5] 巡检通过，点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Info Robot Monitor 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_09",
+                title="Info Robot Monitor",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

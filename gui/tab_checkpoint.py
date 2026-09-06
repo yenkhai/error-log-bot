@@ -17,9 +17,10 @@ import threading
 import traceback
 import tkinter as tk
 import customtkinter as ctk
+from datetime import datetime
 from core.browser import BrowserManager
 from core.base_checker import BaseChecker
-from core.page_logger import PageLogger
+from core.checkpoint_store import CheckpointStore
 
 # 导入所有 15 个 NIW 关卡
 from pages.niw.page_01_pending_wager import PendingWagerChecker
@@ -122,11 +123,8 @@ class CheckpointTab(ctk.CTkFrame):
         # 关卡选择面板展开状态
         self.matrix_visible = True
 
-        # 本轮巡检结果汇总（用于写 INDEX.txt）
+        # 本轮巡检结果汇总
         self._run_results = []
-
-        # 缓存日志行（用于写入文件）
-        self._page_log_buffer = []
 
         # 关卡勾选控制变量列表 (默认全部 True)
         self.niw_vars    = [ctk.BooleanVar(value=True) for _ in range(15)]
@@ -194,7 +192,7 @@ class CheckpointTab(ctk.CTkFrame):
 
         # ⏭ 跳过打勾
         self.btn_skip = ctk.CTkButton(
-            top_frame, text="skip", command=self.start_skip_and_checkpoint_thread,
+            top_frame, text="Skip", command=self.start_skip_and_checkpoint_thread,
             fg_color="#8e44ad", hover_color="#732d91",
             font=ctk.CTkFont(weight="bold"), width=85
         )
@@ -214,43 +212,39 @@ class CheckpointTab(ctk.CTkFrame):
         )
         self.btn_clear.pack(side="right", padx=3, pady=5)
 
-        # 📁 打开日志文件夹
-        self.btn_open_logs = ctk.CTkButton(
-            top_frame, text="Logs", command=self.open_log_folder, width=65
-        )
-        self.btn_open_logs.pack(side="right", padx=3, pady=5)
-
         # 1.5 定时自动巡检调度控制栏 (Hourly Auto-Run Scheduler)
         schedule_frame = ctk.CTkFrame(self, fg_color="#1a202c", corner_radius=6)
         schedule_frame.pack(fill="x", padx=10, pady=(2, 4))
 
         self.switch_hourly = ctk.CTkSwitch(
-            schedule_frame, text="⏰ 定时自动巡检", variable=self.hourly_auto_var,
+            schedule_frame, text="⏰ Auto Schedule", variable=self.hourly_auto_var,
             command=self.toggle_hourly_auto, font=ctk.CTkFont(weight="bold", size=12),
             progress_color="#2ecc71"
         )
-        self.switch_hourly.pack(side="left", padx=(10, 8), pady=4)
+        self.switch_hourly.pack(side="left", padx=(10, 6), pady=4)
 
         self.opt_interval = ctk.CTkOptionMenu(
-            schedule_frame, values=["每 60 分钟 (1小时)", "每 30 分钟", "每 120 分钟 (2小时)"],
-            width=140, height=24, font=ctk.CTkFont(size=11),
+            schedule_frame, values=["Every 60m (1 hr)", "Every 30m", "Every 45m"],
+            width=135, height=24, font=ctk.CTkFont(size=11),
             command=self._on_interval_changed
         )
-        self.opt_interval.set("每 60 分钟 (1小时)")
-        self.opt_interval.pack(side="left", padx=5, pady=4)
+        self.opt_interval.set("Every 60m (1 hr)")
+        self.opt_interval.pack(side="left", padx=4, pady=4)
 
+        # 优先将右侧报警音开关 pack 到最右侧，保证绝对不被挤压遮挡
+        self.switch_sound = ctk.CTkSwitch(
+            schedule_frame, text="🔔 Sound Alert", variable=self.sound_alert_var,
+            font=ctk.CTkFont(weight="bold", size=11), progress_color="#e74c3c", width=46
+        )
+        self.switch_sound.pack(side="right", padx=(6, 12), pady=4)
+
+        # 中间状态指示栏自适应
         self.lbl_schedule_status = ctk.CTkLabel(
-            schedule_frame, text="[状态] ⏸️ 未开启自动巡检",
-            font=ctk.CTkFont(family="Consolas", size=12, weight="bold"),
+            schedule_frame, text="[Status] ⏸️ Disabled",
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
             text_color="#8892B0"
         )
-        self.lbl_schedule_status.pack(side="left", padx=(15, 10), pady=4)
-
-        self.switch_sound = ctk.CTkSwitch(
-            schedule_frame, text="🔔 报警音", variable=self.sound_alert_var,
-            font=ctk.CTkFont(weight="bold", size=11), progress_color="#e74c3c", width=65
-        )
-        self.switch_sound.pack(side="right", padx=(5, 12), pady=4)
+        self.lbl_schedule_status.pack(side="left", padx=(10, 5), pady=4)
 
         # 2. 关卡自定义勾选矩阵
         self.select_frame = ctk.CTkFrame(self)
@@ -261,11 +255,11 @@ class CheckpointTab(ctk.CTkFrame):
         niw_box.pack(fill="x", padx=5, pady=5)
         niw_header = ctk.CTkFrame(niw_box, fg_color="transparent")
         niw_header.pack(fill="x", padx=5, pady=(2, 2))
-        ctk.CTkLabel(niw_header, text="[CONFIG] NIW 关卡定制 (默认全选):",
+        ctk.CTkLabel(niw_header, text="[CONFIG] NIW Stations (Default: Select All):",
                      font=ctk.CTkFont(weight="bold")).pack(side="left")
-        ctk.CTkButton(niw_header, text="全选", width=50, height=22,
+        ctk.CTkButton(niw_header, text="Select All", width=75, height=22,
                       command=lambda: self.set_all_vars(self.niw_vars, True)).pack(side="left", padx=5)
-        ctk.CTkButton(niw_header, text="全不选", width=55, height=22,
+        ctk.CTkButton(niw_header, text="Deselect All", width=85, height=22,
                       command=lambda: self.set_all_vars(self.niw_vars, False)).pack(side="left")
 
         niw_grid = ctk.CTkFrame(niw_box, fg_color="transparent")
@@ -286,11 +280,11 @@ class CheckpointTab(ctk.CTkFrame):
         copier_box.pack(fill="x", padx=5, pady=5)
         copier_header = ctk.CTkFrame(copier_box, fg_color="transparent")
         copier_header.pack(fill="x", padx=5, pady=(2, 2))
-        ctk.CTkLabel(copier_header, text="[CONFIG] Copier & Server 关卡定制 (默认全选):",
+        ctk.CTkLabel(copier_header, text="[CONFIG] Copier & Server Stations (Default: Select All):",
                      font=ctk.CTkFont(weight="bold")).pack(side="left")
-        ctk.CTkButton(copier_header, text="全选", width=50, height=22,
+        ctk.CTkButton(copier_header, text="Select All", width=75, height=22,
                       command=lambda: self.set_all_vars(self.copier_vars, True)).pack(side="left", padx=5)
-        ctk.CTkButton(copier_header, text="全不选", width=55, height=22,
+        ctk.CTkButton(copier_header, text="Deselect All", width=85, height=22,
                       command=lambda: self.set_all_vars(self.copier_vars, False)).pack(side="left")
 
         copier_grid = ctk.CTkFrame(copier_box, fg_color="transparent")
@@ -354,11 +348,11 @@ class CheckpointTab(ctk.CTkFrame):
         if self.matrix_visible:
             self.select_frame.pack_forget()
             self.matrix_visible = False
-            self.btn_toggle_matrix.configure(text="▶ 展开定制")
+            self.btn_toggle_matrix.configure(text="▶ Expand")
         else:
             self.select_frame.pack(fill="x", padx=10, pady=5, before=self.log_text.master)
             self.matrix_visible = True
-            self.btn_toggle_matrix.configure(text="🔽 折叠定制")
+            self.btn_toggle_matrix.configure(text="🔽 Collapse")
 
     def set_all_vars(self, var_list, value: bool):
         for v in var_list:
@@ -366,8 +360,6 @@ class CheckpointTab(ctk.CTkFrame):
 
     def log(self, message: str):
         """线程安全地向彩色日志控制台追加一行，自动根据内容分配颜色标签"""
-        # 同时缓存到页面日志 buffer
-        self._page_log_buffer.append(message)
 
         def append():
             tag = _classify_tag(message)
@@ -382,17 +374,6 @@ class CheckpointTab(ctk.CTkFrame):
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
 
-    def open_log_folder(self):
-        """打开桌面 CheckpointLogs 文件夹"""
-        import os, subprocess
-        from core.page_logger import LOG_ROOT
-        PageLogger.ensure_dirs()
-        try:
-            subprocess.Popen(f'explorer "{LOG_ROOT}"')
-            self.log(f"[LOG] 已打开日志文件夹: {LOG_ROOT}")
-        except Exception as e:
-            self.log(f"[WARN] 打开文件夹失败: {e}")
-
     # ─────────────────────────────────────────────────────────────────
     #  定时自动巡检调度方法 (Hourly Auto-Run Engine)
     # ─────────────────────────────────────────────────────────────────
@@ -400,15 +381,15 @@ class CheckpointTab(ctk.CTkFrame):
         """周期下拉框选择事件"""
         if "30" in choice:
             self.hourly_interval_seconds = 1800
-        elif "120" in choice:
-            self.hourly_interval_seconds = 7200
+        elif "45" in choice:
+            self.hourly_interval_seconds = 2700
         else:
             self.hourly_interval_seconds = 3600
         
         # 若当前正在等待倒计时中，重新计算下一次执行目标时间
         if self.hourly_auto_var.get() and self.next_run_timestamp is not None:
             self.next_run_timestamp = time.time() + self.hourly_interval_seconds
-            self.log(f"[TIMER] ⚙️ 巡检周期已切换为: {choice}")
+            self.log(f"[TIMER] ⚙️ Schedule interval switched to: {choice}")
 
     def toggle_hourly_auto(self):
         """开启 / 关闭 定时自动巡检开关 (开启后进入倒计时，不立即触发)"""
@@ -421,17 +402,17 @@ class CheckpointTab(ctk.CTkFrame):
             target_time = time.strftime("%H:%M:%S", time.localtime(self.next_run_timestamp))
             
             self.log("══════════════════════════════════════════════════")
-            self.log(f"  ⏰ 已开启定时自动巡检！(周期: 每 {mins} 分钟)")
-            self.log(f"  ⏳ 倒计时开始：将在 {target_time} (约 {mins} 分钟后) 自动执行第 1 轮巡检")
+            self.log(f"  ⏰ Auto schedule enabled! (Interval: Every {mins} min)")
+            self.log(f"  ⏳ Countdown started: Next run at {target_time} (in ~{mins} mins) for Cycle 1")
             self.log("══════════════════════════════════════════════════")
             
             if self.hourly_timer_id is not None:
                 self.after_cancel(self.hourly_timer_id)
             self._hourly_tick()
         else:
-            self.log("[TIMER] ⏹ 已关闭定时自动巡检模式。")
+            self.log("[TIMER] ⏹ Auto schedule disabled.")
             self.next_run_timestamp = None
-            self.lbl_schedule_status.configure(text="[状态] ⏸️ 未开启自动巡检", text_color="#8892B0")
+            self.lbl_schedule_status.configure(text="[Status] ⏸️ Disabled", text_color="#8892B0")
             if self.hourly_timer_id is not None:
                 self.after_cancel(self.hourly_timer_id)
                 self.hourly_timer_id = None
@@ -439,13 +420,14 @@ class CheckpointTab(ctk.CTkFrame):
     def _hourly_tick(self):
         """每秒驱动一次的倒计时调度引擎"""
         if not self.hourly_auto_var.get():
+            self.hourly_timer_id = None
             return
 
         now = time.time()
         if self.is_running:
             # 正在运行巡检任务
             self.lbl_schedule_status.configure(
-                text=f"[状态] 🚀 正在执行第 {self.hourly_cycle_count + 1} 轮巡检中...",
+                text=f"[Status] 🚀 Cycle {self.hourly_cycle_count + 1} Running...",
                 text_color="#50FA7B"
             )
             # 运行期间清空 next_run_timestamp，等全量通关后再精确设定下一次时间
@@ -455,7 +437,7 @@ class CheckpointTab(ctk.CTkFrame):
             if self.last_failed_type is not None:
                 # 存在 Error 中断，暂停下一轮，保护现场等待人工介入
                 self.lbl_schedule_status.configure(
-                    text=f"[状态] ⚠️ 上一轮在 {self.last_failed_type} 遇错中断！已暂停，等待处理",
+                    text=f"[Status] ⚠️ Paused ({self.last_failed_type} Error)",
                     text_color="#FF4D4D"
                 )
             else:
@@ -470,17 +452,17 @@ class CheckpointTab(ctk.CTkFrame):
                     # 倒计时归零，自动唤醒触发下一轮全量巡检
                     self.next_run_timestamp = None
                     if not self._check_cross_tab_busy():
-                        self.log(f"\n[TIMER] ⏰ 倒计时结束，自动唤醒执行第 {self.hourly_cycle_count + 1} 轮全量巡检！")
+                        self.log(f"\n[TIMER] ⏰ Countdown reached! Starting scheduled Cycle {self.hourly_cycle_count + 1}...")
                         self.start_full_thread()
                     else:
-                        self.log("[TIMER] ⚠️ 检测到 Error Log 工具正在运行，延后 30 秒再次尝试唤醒巡检...")
+                        self.log("[TIMER] ⚠️ Error Log exporter is currently active. Postponing checkpoint run by 30 seconds...")
                         self.next_run_timestamp = now + 30
                 else:
                     mins = diff // 60
                     secs = diff % 60
                     target_time = time.strftime("%H:%M:%S", time.localtime(self.next_run_timestamp))
                     self.lbl_schedule_status.configure(
-                        text=f"[状态] ⏳ 下次巡检: {target_time} (还剩 {mins}分{secs:02d}秒) | 已完成: {self.hourly_cycle_count}轮",
+                        text=f"[Status] ⏳ Next: {target_time} ({mins}m {secs:02d}s) | Cycles: {self.hourly_cycle_count}",
                         text_color="#FFB86C"
                     )
 
@@ -505,21 +487,14 @@ class CheckpointTab(ctk.CTkFrame):
     def request_stop(self):
         """用户点击停止 — 设置标志，当前页跑完后停止"""
         if not self.is_running:
-            self.log("[STOP] 当前没有正在运行的巡检任务。")
+            self.log("[STOP] No active inspection task running.")
             return
         self.stop_requested = True
-        self.log("[STOP] ⏹ 已收到停止指令！将在当前页面完成后停止，请稍候...")
+        self.log("[STOP] ⏹ Stop request received! Halting after current page finishes...")
         if self.hourly_auto_var.get():
-            self.log("[STOP] 提示: 定时巡检仍处于开启状态；如需完全停止定时，请关闭上方【⏰ 定时自动巡检】开关。")
+            self.log("[STOP] Note: Auto schedule remains enabled. Toggle [⏰ Auto Schedule] switch to disable.")
 
     def update_button_states(self):
-        """
-        根据当前巡检状态及跨 Tab 互斥状态精细化控制所有按钮的 Enable / Disable 状态：
-        - 自身运行中 (is_running=True): 所有启动、续传、跳过按钮变灰禁用，仅 [STOP] 启用
-        - 另一个 Tab (Error Log) 运行中: 所有启动、续传、跳过、STOP 全部变灰禁用
-        - 有中断 (last_failed_type 不为空 且空闲): [全量/NIW/Copier]、[续传]、[跳过] 全部启用，[STOP] 变灰
-        - 空闲/完成 (无中断): [全量/NIW/Copier] 启用，[续传]、[跳过]、[STOP] 变灰
-        """
         def apply():
             is_error_log_running = False
             if hasattr(self.app, 'error_log_tab') and getattr(self.app.error_log_tab, 'is_running', False):
@@ -575,7 +550,7 @@ class CheckpointTab(ctk.CTkFrame):
     def _check_cross_tab_busy(self) -> bool:
         """检查 Error Log 导出工具是否正在运行"""
         if hasattr(self.app, 'error_log_tab') and getattr(self.app.error_log_tab, 'is_running', False):
-            self.log("[WARN] 🚫 拒绝执行：Error Log 日志导出工具正在运行中！为了防止冲突，请等待或停止 Error Log 任务。")
+            self.log("[WARN] 🚫 Operation rejected: Error Log Exporter is currently running! Please wait or stop Error Log task.")
             return True
         return False
 
@@ -590,12 +565,15 @@ class CheckpointTab(ctk.CTkFrame):
         self.is_running = True
         self.stop_requested = False
         self._run_results = []
+        if niw_start == 0 and copier_start == 0:
+            self.last_failed_type = None
+            self.last_failed_index = 0
         if hasattr(self.app, 'notify_task_state_changed'):
             self.app.notify_task_state_changed()
         else:
             self.update_button_states()
         self.log("══════════════════════════════════════════════════")
-        self.log("  ▶ 全量巡检启动 — NIW (15站) → Copier (9站)")
+        self.log("  ▶ Full Checkpoint Started — NIW (15 Stations) → Copier (9 Stations)")
         self.log("══════════════════════════════════════════════════")
         threading.Thread(
             target=self.run_full_pipeline,
@@ -611,12 +589,15 @@ class CheckpointTab(ctk.CTkFrame):
         self.is_running = True
         self.stop_requested = False
         self._run_results = []
+        if niw_start == 0:
+            self.last_failed_type = None
+            self.last_failed_index = 0
         if hasattr(self.app, 'notify_task_state_changed'):
             self.app.notify_task_state_changed()
         else:
             self.update_button_states()
         self.log("══════════════════════════════════════════════════")
-        self.log("  ▶ 巡检启动 — 仅 NIW (15站)")
+        self.log("  ▶ Checkpoint Started — NIW Only (15 Stations)")
         self.log("══════════════════════════════════════════════════")
         threading.Thread(
             target=self.run_full_pipeline,
@@ -632,12 +613,15 @@ class CheckpointTab(ctk.CTkFrame):
         self.is_running = True
         self.stop_requested = False
         self._run_results = []
+        if copier_start == 0:
+            self.last_failed_type = None
+            self.last_failed_index = 0
         if hasattr(self.app, 'notify_task_state_changed'):
             self.app.notify_task_state_changed()
         else:
             self.update_button_states()
         self.log("══════════════════════════════════════════════════")
-        self.log("  ▶ 巡检启动 — 仅 Copier & Server (9站)")
+        self.log("  ▶ Checkpoint Started — Copier & Server Only (9 Stations)")
         self.log("══════════════════════════════════════════════════")
         threading.Thread(
             target=self.run_full_pipeline,
@@ -651,10 +635,10 @@ class CheckpointTab(ctk.CTkFrame):
             return
         is_full = getattr(self, "current_pipeline_mode", "FULL") == "FULL"
         if self.last_failed_type == "Copier":
-            self.log(f"[RESUME] 从 Copier 第 {self.last_failed_index + 1} 站续传...")
+            self.log(f"[RESUME] Resuming from Copier Station {self.last_failed_index + 1}...")
             self.start_copier_only_thread(copier_start=self.last_failed_index)
         else:
-            self.log(f"[RESUME] 从 NIW 第 {self.last_failed_index + 1} 站续传...")
+            self.log(f"[RESUME] Resuming from NIW Station {self.last_failed_index + 1}...")
             if is_full:
                 self.start_full_thread(niw_start=self.last_failed_index, copier_start=0, full=True)
             else:
@@ -669,150 +653,123 @@ class CheckpointTab(ctk.CTkFrame):
             self.app.notify_task_state_changed()
         else:
             self.update_button_states()
-        self.log("[SKIP] 强制打勾跳过当前页，进入下一关...")
+        self.log("[SKIP] Force passing current station and moving to next...")
         threading.Thread(target=self.run_skip_and_checkpoint_pipeline, daemon=True).start()
 
     # ─────────────────────────────────────────────────────────────────
     #  流水线核心逻辑
     # ─────────────────────────────────────────────────────────────────
     def run_full_pipeline(self, niw_start=0, copier_start=0, full=True):
-        """
-        全量巡检流水线: NIW → Copier
-        - 每完成一站，写入 Desktop\\CheckpointLogs\\ 对应文件
-        - 每完成一站后检查 stop_requested 标志
-        """
         try:
             user, pwd = self.app.get_credentials()
             url = self.app.get_login_url()
-            self.log(f"[CONFIG] 账号: {user}  |  域名: {url}")
+            self.log(f"[CONFIG] User: {user}  |  URL: {url}")
 
-            self.log("[BROWSER] 正在连接 Chrome 浏览器...")
+            self.log("[BROWSER] Connecting to Chrome browser...")
             driver = BrowserManager.get_driver(url=url, user=user, pwd=pwd)
-            self.log("[BROWSER] 浏览器就绪！")
+            self.log("[BROWSER] Browser ready!")
             self.log("──────────────────────────────────────────────────")
 
             # NIW 关卡列表
             niw_page_keys = [f"niw_{str(i+1).zfill(2)}" for i in range(15)]
             niw_checkers = [
-                ("NIW 第1站  Pending Wager",    PendingWagerChecker(driver, self.log)),
-                ("NIW 第2站  CCL Recover",       CCLRecoverChecker(driver, self.log)),
-                ("NIW 第3站  Matches Wagers",    MatchesWagersChecker(driver, self.log)),
-                ("NIW 第4站  Result Process",    ResultProcessChecker(driver, self.log)),
-                ("NIW 第5站  Calculate Betslips",CalculateBetslipsChecker(driver, self.log)),
-                ("NIW 第6站  RPT PolyMarket",    RPTPolyMarketChecker(driver, self.log)),
-                ("NIW 第7站  RPT Compare",       RPTCompareChecker(driver, self.log)),
-                ("NIW 第8站  RPT AI",            RPTAIChecker(driver, self.log)),
-                ("NIW 第9站  RPT Compare UTC",   RPTCompareUTCChecker(driver, self.log)),
-                ("NIW 第10站 Forecast",          ForecastChecker(driver, self.log)),
-                ("NIW 第11站 Check CCL",         CheckCCLChecker(driver, self.log)),
-                ("NIW 第12站 Wsum Sport",        WsumSportChecker(driver, self.log)),
-                ("NIW 第13站 HG Percentages",    HGPercentagesChecker(driver, self.log)),
-                ("NIW 第14站 RPT CRS",           RPTCRSChecker(driver, self.log)),
-                ("NIW 第15站 1 Wallet Pending",  OneWalletPendingChecker(driver, self.log)),
+                ("NIW Station 01 - Pending Wager",     PendingWagerChecker(driver, self.log)),
+                ("NIW Station 02 - CCL Recover",        CCLRecoverChecker(driver, self.log)),
+                ("NIW Station 03 - Matches Wagers",     MatchesWagersChecker(driver, self.log)),
+                ("NIW Station 04 - Result Process",     ResultProcessChecker(driver, self.log)),
+                ("NIW Station 05 - Calculate Betslips", CalculateBetslipsChecker(driver, self.log)),
+                ("NIW Station 06 - RPT PolyMarket",     RPTPolyMarketChecker(driver, self.log)),
+                ("NIW Station 07 - RPT Compare",        RPTCompareChecker(driver, self.log)),
+                ("NIW Station 08 - RPT AI",             RPTAIChecker(driver, self.log)),
+                ("NIW Station 09 - RPT Compare UTC",    RPTCompareUTCChecker(driver, self.log)),
+                ("NIW Station 10 - Forecast",           ForecastChecker(driver, self.log)),
+                ("NIW Station 11 - Check CCL",          CheckCCLChecker(driver, self.log)),
+                ("NIW Station 12 - Wsum Sport",         WsumSportChecker(driver, self.log)),
+                ("NIW Station 13 - HG Percentages",     HGPercentagesChecker(driver, self.log)),
+                ("NIW Station 14 - RPT CRS",            RPTCRSChecker(driver, self.log)),
+                ("NIW Station 15 - 1 Wallet Pending",   OneWalletPendingChecker(driver, self.log)),
             ]
 
             # Copier 关卡列表
             copier_page_keys = [f"copier_{str(i+1).zfill(2)}" for i in range(9)]
             copier_checkers = [
-                ("Copier 第1站 Copier",           CopierChecker(driver, self.log)),
-                ("Copier 第2站 DB Server Status",  DBServerStatusChecker(driver, self.log)),
-                ("Copier 第3站 AP Server Status",  APServerStatusChecker(driver, self.log)),
-                ("Copier 第4站 Check AP Space",    CheckAPSpaceChecker(driver, self.log)),
-                ("Copier 第5站 Error Log",         ErrorLogChecker(driver, self.log)),
-                ("Copier 第6站 Redis Server",      RedisServerChecker(driver, self.log)),
-                ("Copier 第7站 Robot Monitor",     RobotMonitorChecker(driver, self.log)),
-                ("Copier 第8站 NIW Robot Monitor", NIWRobotMonitorChecker(driver, self.log)),
-                ("Copier 第9站 Info Robot Monitor",InfoRobotMonitorChecker(driver, self.log)),
+                ("Copier Station 01 - Copier",            CopierChecker(driver, self.log)),
+                ("Copier Station 02 - DB Server Status",   DBServerStatusChecker(driver, self.log)),
+                ("Copier Station 03 - AP Server Status",   APServerStatusChecker(driver, self.log)),
+                ("Copier Station 04 - Check AP Space",     CheckAPSpaceChecker(driver, self.log)),
+                ("Copier Station 05 - Error Log",          ErrorLogChecker(driver, self.log)),
+                ("Copier Station 06 - Redis Server",       RedisServerChecker(driver, self.log)),
+                ("Copier Station 07 - Robot Monitor",      RobotMonitorChecker(driver, self.log)),
+                ("Copier Station 08 - NIW Robot Monitor",  NIWRobotMonitorChecker(driver, self.log)),
+                ("Copier Station 09 - Info Robot Monitor", InfoRobotMonitorChecker(driver, self.log)),
             ]
 
             interrupted = False
 
             # ── NIW 区域 ──
             if niw_start < 15:
-                self.log(f"[PIPELINE START] NIW 区域 — 从第 {niw_start+1} 站开始")
+                self.log(f"[PIPELINE START] NIW Section — Starting from Station {niw_start+1}")
                 for i, (name, checker) in enumerate(niw_checkers[niw_start:]):
                     idx = niw_start + i
 
                     if not self.niw_vars[idx].get():
-                        self.log(f"[SKIP] 已跳过 {name}（用户未勾选）")
+                        self.log(f"[SKIP] Skipped {name} (unchecked by user)")
                         continue
 
-                    # 清空页面日志 buffer
-                    self._page_log_buffer = []
-
                     res = checker.check()
-                    ts = __import__('datetime').datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                    # 写入桌面日志文件
-                    try:
-                        PageLogger.write_page_log(
-                            page_key=niw_page_keys[idx],
-                            station_name=name,
-                            is_success=res,
-                            raw_lines=list(self._page_log_buffer)
-                        )
-                    except Exception as log_err:
-                        self.log(f"[WARN] 写入日志文件失败: {log_err}")
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                     self._run_results.append((niw_page_keys[idx], name, res, ts))
+                    if hasattr(self.app, 'log_viewer_tab'):
+                        self.after(0, self.app.log_viewer_tab.refresh_list)
 
                     if not res:
                         self.last_failed_type = "NIW"
                         self.last_failed_index = idx
-                        self.log(f"\n[INTERRUPT] ❌ {name} 检测到异常，巡检中断！")
-                        self.log("  → 点击 [⏯ 断点续传] 重试当前站")
-                        self.log("  → 点击 [⏭ 跳过打勾] 强行通关当前站进入下一站")
+                        self.log(f"\n[INTERRUPT] ❌ {name} error detected, inspection halted!")
+                        self.log("  → Click [Resume] to retry current station")
+                        self.log("  → Click [Skip] to force pass current station and proceed")
                         self.play_error_sound()
                         interrupted = True
                         break
 
                     # 检查 STOP 标志
                     if self.stop_requested:
-                        self.log(f"\n[STOP] ⏹ 已完成 {name}，依据用户指令停止巡检。")
+                        self.log(f"\n[STOP] ⏹ Completed {name}. Stopping pipeline per user request.")
                         interrupted = True
                         break
 
-            # ── Copier 区域（NIW 全部通过且未停止，或处于 FULL / COPIER 模式才继续）──
+            # ── Copier 区域 ──
             should_run_copier = (full or copier_start > 0 or getattr(self, "current_pipeline_mode", "FULL") in ["FULL", "COPIER"])
             if not interrupted and should_run_copier:
                 self.log("──────────────────────────────────────────────────")
-                self.log(f"[PIPELINE START] Copier & Server 区域 — 从第 {copier_start+1} 站开始")
+                self.log(f"[PIPELINE START] Copier & Server Section — Starting from Station {copier_start+1}")
                 for i, (name, checker) in enumerate(copier_checkers[copier_start:]):
                     idx = copier_start + i
 
                     if not self.copier_vars[idx].get():
-                        self.log(f"[SKIP] 已跳过 {name}（用户未勾选）")
+                        self.log(f"[SKIP] Skipped {name} (unchecked by user)")
                         continue
 
-                    self._page_log_buffer = []
-
                     res = checker.check()
-                    ts = __import__('datetime').datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                    try:
-                        PageLogger.write_page_log(
-                            page_key=copier_page_keys[idx],
-                            station_name=name,
-                            is_success=res,
-                            raw_lines=list(self._page_log_buffer)
-                        )
-                    except Exception as log_err:
-                        self.log(f"[WARN] 写入日志文件失败: {log_err}")
+                    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                     self._run_results.append((copier_page_keys[idx], name, res, ts))
+                    if hasattr(self.app, 'log_viewer_tab'):
+                        self.after(0, self.app.log_viewer_tab.refresh_list)
 
                     if not res:
                         self.last_failed_type = "Copier"
                         self.last_failed_index = idx
-                        self.log(f"\n[INTERRUPT] ❌ {name} 检测到异常，巡检中断！")
-                        self.log("  → 点击 [⏯ 断点续传] 重试当前站")
-                        self.log("  → 点击 [⏭ 跳过打勾] 强行通关当前站进入下一站")
+                        self.log(f"\n[INTERRUPT] ❌ {name} error detected, inspection halted!")
+                        self.log("  → Click [Resume] to retry current station")
+                        self.log("  → Click [Skip] to force pass current station and proceed")
                         self.play_error_sound()
                         interrupted = True
                         break
 
                     if self.stop_requested:
-                        self.log(f"\n[STOP] ⏹ 已完成 {name}，依据用户指令停止巡检。")
+                        self.log(f"\n[STOP] ⏹ Completed {name}. Stopping pipeline per user request.")
                         interrupted = True
                         break
 
@@ -820,26 +777,21 @@ class CheckpointTab(ctk.CTkFrame):
                 self.last_failed_type = None
                 self.last_failed_index = 0
                 self.log("\n══════════════════════════════════════════════════")
-                self.log("  🎉 恭喜！巡检关卡全部顺畅通关！")
+                self.log("  🎉 Congratulations! All checkpoint stations passed successfully!")
                 self.log("══════════════════════════════════════════════════")
-                # 仅在全部成功通关时，才自动跳回 NIW 第1站 Pending Wager
                 try:
                     checker = BaseChecker(driver, self.log)
                     checker.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW", wait_seconds=2)
-                    self.log("[NAVIGATE] ✅ 巡检全部顺利完成，已自动跳回 Pending Wager (NIW 第1站) 页面")
+                    self.log("[NAVIGATE] ✅ All stations passed. Navigated back to Pending Wager (NIW Station 1)")
                 except Exception:
                     pass
 
-            # 更新 INDEX.txt 汇总
-            if self._run_results:
-                try:
-                    PageLogger.update_index(self._run_results)
-                    self.log(f"[LOG] 巡检记录已保存至桌面 CheckpointLogs\\")
-                except Exception as e:
-                    self.log(f"[WARN] 写入 INDEX.txt 失败: {e}")
+            # 通知日志浏览器 Tab 刷新列表
+            if hasattr(self.app, 'log_viewer_tab'):
+                self.after(0, self.app.log_viewer_tab.refresh_list)
 
         except Exception as e:
-            self.log(f"\n[ERROR] 巡检过程出现异常: {e}\n{traceback.format_exc()}")
+            self.log(f"\n[ERROR] Pipeline encountered an exception: {e}\n{traceback.format_exc()}")
             self.play_error_sound()
         finally:
             self.after(0, self.reset_buttons)
@@ -852,9 +804,26 @@ class CheckpointTab(ctk.CTkFrame):
         try:
             driver = BrowserManager.get_driver()
             checker = BaseChecker(driver, self.log)
-            self.log("[SKIP] 正在强制点击当前页面 Checkpoint...")
+            self.log("[SKIP] Forcing Checkpoint click on current page...")
             checker.click_checkpoint()
-            self.log("[SKIP SUCCESS] Checkpoint 打勾完成！准备进入下一关...")
+            self.log("[SKIP SUCCESS] Checkpoint checked! Preparing next station...")
+
+            # 标记当前被跳过的关卡在 CheckpointStore 中已打勾通过
+            curr_pk = f"copier_{str(self.last_failed_index + 1).zfill(2)}" if self.last_failed_type == "Copier" else f"niw_{str(self.last_failed_index + 1).zfill(2)}"
+            curr_data = CheckpointStore.get(curr_pk)
+            if curr_data:
+                orig_summary = curr_data.get("summary", "")
+                CheckpointStore.save(
+                    page_key=curr_pk,
+                    title=curr_data.get("title", ""),
+                    status=True,
+                    tables=curr_data.get("tables", []),
+                    headers=curr_data.get("headers", []),
+                    rows=curr_data.get("rows", []),
+                    summary=f"[Force Skipped & Checked] {orig_summary}" if orig_summary else "Force Skipped & Checked by user"
+                )
+            if hasattr(self.app, 'log_viewer_tab'):
+                self.after(0, self.app.log_viewer_tab.refresh_list)
 
             next_index = self.last_failed_index + 1
             is_full = getattr(self, "current_pipeline_mode", "FULL") == "FULL"
@@ -862,35 +831,49 @@ class CheckpointTab(ctk.CTkFrame):
             if self.last_failed_type == "Copier":
                 if next_index < 9:
                     _continuing_to_next = True
-                    self.log(f"[SKIP] 继续从 Copier 第 {next_index + 1} 站执行...")
+                    self.log(f"[SKIP] Proceeding from Copier Station {next_index + 1}...")
                     self.run_full_pipeline(niw_start=15, copier_start=next_index, full=False)
                 else:
-                    self.log("[COMPLETE] Copier & Server 全部关卡已巡检完毕！")
+                    self.last_failed_type = None
+                    self.last_failed_index = 0
+                    self.log("[COMPLETE] All Copier & Server stations completed!")
+                    self.log("\n══════════════════════════════════════════════════")
+                    self.log("  🎉 Congratulations! All checkpoint stations passed successfully!")
+                    self.log("══════════════════════════════════════════════════")
                     try:
                         checker.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW", wait_seconds=2)
-                        self.log("[NAVIGATE] ✅ 已自动跳回 Pending Wager (NIW 第1站) 页面")
+                        self.log("[NAVIGATE] ✅ All stations passed. Navigated back to Pending Wager (NIW Station 1)")
                     except Exception:
                         pass
+                    if hasattr(self.app, 'log_viewer_tab'):
+                        self.after(0, self.app.log_viewer_tab.refresh_list)
             else:
                 if next_index < 15:
                     _continuing_to_next = True
-                    self.log(f"[SKIP] 继续从 NIW 第 {next_index + 1} 站执行...")
+                    self.log(f"[SKIP] Proceeding from NIW Station {next_index + 1}...")
                     self.run_full_pipeline(niw_start=next_index, copier_start=0, full=is_full)
                 else:
                     if is_full:
                         _continuing_to_next = True
-                        self.log("[SKIP] NIW 已全部完成，自动接续 Copier & Server 巡检...")
+                        self.log("[SKIP] NIW section completed! Continuing to Copier & Server...")
                         self.run_full_pipeline(niw_start=15, copier_start=0, full=True)
                     else:
-                        self.log("[COMPLETE] NIW 全部关卡已巡检完毕！")
+                        self.last_failed_type = None
+                        self.last_failed_index = 0
+                        self.log("[COMPLETE] All NIW stations completed!")
+                        self.log("\n══════════════════════════════════════════════════")
+                        self.log("  🎉 Congratulations! All checkpoint stations passed successfully!")
+                        self.log("══════════════════════════════════════════════════")
                         try:
                             checker.navigate_to_menu("Pending Wager", menu_id="apy_b0i2text", section="NIW", wait_seconds=2)
-                            self.log("[NAVIGATE] ✅ 已自动跳回 Pending Wager (NIW 第1站) 页面")
+                            self.log("[NAVIGATE] ✅ All stations passed. Navigated back to Pending Wager (NIW Station 1)")
                         except Exception:
                             pass
+                        if hasattr(self.app, 'log_viewer_tab'):
+                            self.after(0, self.app.log_viewer_tab.refresh_list)
 
         except Exception as e:
-            self.log(f"[ERROR] 强制跳过过程异常: {e}\n{traceback.format_exc()}")
+            self.log(f"[ERROR] Force skip encountered exception: {e}\n{traceback.format_exc()}")
         finally:
             if not _continuing_to_next:
                 self.after(0, self.reset_buttons)

@@ -19,8 +19,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class APServerStatusChecker(BaseChecker):
@@ -113,26 +113,61 @@ class APServerStatusChecker(BaseChecker):
 
             # [步骤 4] scan_red_cells() 全页红底/红字深度扫描（双重确认）
             red_items = self.scan_red_cells()
+            
+            headers = ["IP", "Status", "Context"]
+            rows = []
+            for item in ip_list:
+                bg = "red" if item["isRed"] else "green"
+                rows.append([
+                    item["ip"],
+                    CheckpointStore.make_cell("Error" if item["isRed"] else "OK", bg),
+                    item["context"]
+                ])
+            
+            if red_items:
+                for item in red_items:
+                    rows.append([CheckpointStore.make_cell(str(item), "red"), "Error", "RED NODE"])
 
             if red_items:
                 self.log(f"[Error] AP Server Status 检测到 {len(red_items)} 个红色异常节点，触发 Tier 1 致命阻断！")
                 for item in red_items:
                     self.log(f"   [RED NODE] {item}")
-                self.log_check_result(
-                    False,
-                    f"AP Server Status 存在 {len(red_items)} 个红色异常节点（含红色 IP: {red_ips}），Tier 1 强阻断 Checkpoint！"
+                
+                msg = f"AP Server Status 存在 {len(red_items)} 个红色异常节点（含红色 IP: {red_ips}），Tier 1 强阻断 Checkpoint！"
+                self.log_check_result(False, msg)
+                CheckpointStore.save(
+                    page_key="copier_03",
+                    title="AP Server Status",
+                    status=False,
+                    headers=headers,
+                    rows=rows,
+                    summary=msg
                 )
                 return False
             else:
-                self.log_check_result(
-                    True,
-                    f"AP Server Status 全部 {total_count} 台服务器无红色异常，巡检通过！"
-                )
+                msg = f"AP Server Status 全部 {total_count} 台服务器无红色异常，巡检通过！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_03",
+                title="AP Server Status",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 5] 巡检通过，点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"AP Server Status 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_03",
+                title="AP Server Status",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

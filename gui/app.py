@@ -15,12 +15,14 @@ import customtkinter as ctk
 from config import load_config, save_config
 from gui.tab_checkpoint import CheckpointTab
 from gui.tab_error_log import ErrorLogTab
+from gui.tab_log_viewer import LogViewerTab
 
 class UnifiedBotApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("自动化系统平台 - Checkpoint 巡检 & Error Log 统一大脑")
-        self.geometry("1000x750")
+        self.title("Automation Platform - Checkpoint & Error Log Unified Hub")
+        self.geometry("1060x760")
+        self.minsize(980, 680)
         
         # 设定全局暗黑暗青现代 UI 模式
         ctk.set_appearance_mode("Dark")
@@ -29,6 +31,7 @@ class UnifiedBotApp(ctk.CTk):
         # 加载本地 JSON 配置文件
         self.config_data = load_config()
         self.account_var = ctk.StringVar(value="op35") # 默认选中的账号单选框
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.build_ui()
 
     def build_ui(self):
@@ -37,8 +40,8 @@ class UnifiedBotApp(ctk.CTk):
         header.pack(fill="x")
         
         title_label = ctk.CTkLabel(
-            header, text="🛡️ 运维全自动巡检与日志解析系统 v2.0",
-            font=("Microsoft YaHei", 16, "bold")
+            header, text="🛡️ Operations Automated Inspection & Log Analytics System v2.0",
+            font=("Segoe UI", 16, "bold")
         )
         title_label.pack(side="left", padx=20, pady=8)
 
@@ -50,13 +53,13 @@ class UnifiedBotApp(ctk.CTk):
         url_frame = ctk.CTkFrame(login_frame, fg_color="transparent")
         url_frame.pack(side="top", fill="x", padx=10, pady=(6, 2))
 
-        ctk.CTkLabel(url_frame, text="🌐 登录 Domain/URL:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(url_frame, text="🌐 Login Domain/URL:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 5))
         self.entry_url = ctk.CTkEntry(url_frame, width=420)
         self.entry_url.pack(side="left", padx=(0, 10))
         self.entry_url.insert(0, self.config_data.get("LOGIN_URL", "http://10.16.250.9/ubah/index.php?"))
 
         btn_save_url = ctk.CTkButton(
-            url_frame, text="💾 保存新域名", width=90, command=self.save_domain_url,
+            url_frame, text="💾 Save Domain", width=95, command=self.save_domain_url,
             fg_color="#17a2b8", hover_color="#138496"
         )
         btn_save_url.pack(side="left")
@@ -65,7 +68,7 @@ class UnifiedBotApp(ctk.CTk):
         radio_frame = ctk.CTkFrame(login_frame, fg_color="transparent")
         radio_frame.pack(side="top", anchor="w", padx=10, pady=(4, 2))
 
-        ctk.CTkLabel(radio_frame, text="🔑 账号模式:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(radio_frame, text="🔑 Account Mode:", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(0, 10))
 
         ctk.CTkRadioButton(
             radio_frame, text="Default (op35)", variable=self.account_var, value="op35", command=self.update_inputs
@@ -99,14 +102,19 @@ class UnifiedBotApp(ctk.CTk):
         self.tabview.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
         # Tab 1: Checkpoint 自动化巡检选项卡
-        tab_cp = self.tabview.add("🤖 Checkpoint 自动化巡检")
+        tab_cp = self.tabview.add("🤖 Checkpoint Inspection")
         self.checkpoint_tab = CheckpointTab(tab_cp, self)
         self.checkpoint_tab.pack(fill="both", expand=True)
 
         # Tab 2: Error Log 日志抓取导出选项卡
-        tab_el = self.tabview.add("📊 Error Log 日志导出工具")
+        tab_el = self.tabview.add("📊 Error Log Exporter")
         self.error_log_tab = ErrorLogTab(tab_el, self)
         self.error_log_tab.pack(fill="both", expand=True)
+
+        # Tab 3: 巡检日志浏览器选项卡
+        tab_lv = self.tabview.add("📋 Checkpoint Log Viewer")
+        self.log_viewer_tab = LogViewerTab(tab_lv, self)
+        self.log_viewer_tab.pack(fill="both", expand=True)
 
     def save_domain_url(self):
         """[保存新域名] 将输入框中修改的 URL 持久化存入 config.json"""
@@ -121,16 +129,9 @@ class UnifiedBotApp(ctk.CTk):
         self.entry_user.configure(state="normal")
         self.entry_pass.configure(state="normal")
 
-        if mode == "op35":
+        if mode in ("op35", "op38"):
             self.entry_user.delete(0, "end")
-            self.entry_user.insert(0, "op35")
-            self.entry_pass.delete(0, "end")
-            self.entry_pass.insert(0, "123qwe")
-            self.entry_user.configure(state="disabled")
-            self.entry_pass.configure(state="disabled")
-        elif mode == "op38":
-            self.entry_user.delete(0, "end")
-            self.entry_user.insert(0, "op38")
+            self.entry_user.insert(0, mode)
             self.entry_pass.delete(0, "end")
             self.entry_pass.insert(0, "123qwe")
             self.entry_user.configure(state="disabled")
@@ -138,6 +139,17 @@ class UnifiedBotApp(ctk.CTk):
         else: # Custom Login
             self.entry_user.delete(0, "end")
             self.entry_pass.delete(0, "end")
+
+    def on_close(self):
+        """主窗口关闭拦截: 安全通知后台任务停止并销毁窗口"""
+        try:
+            if hasattr(self, 'checkpoint_tab'):
+                self.checkpoint_tab.stop_requested = True
+            if hasattr(self, 'error_log_tab') and getattr(self.error_log_tab, 'service', None):
+                self.error_log_tab.service.stop_flag = True
+        except Exception:
+            pass
+        self.destroy()
 
     def get_credentials(self):
         """[对外提供接口] 返回当前顶栏界面填写的 (username, password) 账户元组"""

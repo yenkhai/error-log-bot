@@ -10,13 +10,11 @@ Error Log 日志抓取与导出引擎服务类 (services/error_log_scraper.py)
 """
 
 import re
+from urllib.parse import urlparse
 import time
-import json
 from pathlib import Path
 from datetime import datetime, timedelta
-from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException, TimeoutException
@@ -27,7 +25,7 @@ from core.browser import BrowserManager
 class ErrorLogScraperService:
     """Error Log 自动化抓取与导出引擎"""
 
-    def __init__(self, ui_logger=None, ui_skipper=None):
+    def __init__(self, ui_logger=None, ui_skipper=None, login_url=None):
         self.driver = None
         self.logger = ui_logger  # 左侧 Terminal 日志回调
         self.skipper = ui_skipper # 右侧 >10k 跳过记录回调
@@ -35,12 +33,16 @@ class ErrorLogScraperService:
         self.processed_ips = set() # 已处理完毕的 IP 集合 (用于断点续传)
         self.success = False
 
-        # 从全局 config 加载 URL 与鉴权配置
+        # 从全局 config 加载 URL 与鉴权配置 (支持外部传入 UI 当前配置)
         config = load_config()
-        self.login_url = config.get("LOGIN_URL", "http://10.16.250.9/ubah/index.php?")
+        self.login_url = login_url or config.get("LOGIN_URL", "http://10.16.250.9/ubah/index.php?")
         self.auth_user = config.get("AUTH_USER", "bersih")
         self.auth_pass = config.get("AUTH_PASS", "bersih428")
         self.max_record_limit = config.get("MAX_RECORD_LIMIT", 10000) # >10k 安全阈值
+
+        # 从 login_url 动态提取基础主机地址 (避免硬编码 IP)
+        parsed = urlparse(self.login_url)
+        self.base_url = f"{parsed.scheme}://{parsed.hostname}"  # e.g. "http://10.16.250.9"
 
         # 计算昨天的日期，并生成桌面目标文件名 (例如: "error log 3107.txt")
         yesterday = datetime.now() - timedelta(days=1)
@@ -175,7 +177,7 @@ class ErrorLogScraperService:
         单兵干员：直接访问数据弹出窗口 URL 并抓取表格写入 txt
         """
         url_param = ip[3:] if ip.startswith("10.") and len(ip) > 7 else ip
-        direct_url = f"http://{self.auth_user}:{self.auth_pass}@10.16.250.9/ubah/check_ap/system_tool/check_error_log_popup.php?serverap={url_param}"
+        direct_url = f"http://{self.auth_user}:{self.auth_pass}@{urlparse(self.base_url).hostname}/ubah/check_ap/system_tool/check_error_log_popup.php?serverap={url_param}"
         
         self.driver.get(direct_url)
         
@@ -186,21 +188,31 @@ class ErrorLogScraperService:
         except TimeoutException:
             pass
             
-        rows = self.driver.find_elements(By.CSS_SELECTOR, "table tr")
+        # 使用 execute_script 单次瞬时提取表格全部文本，彻底消除几百次 WebDriver HTTP 网络往返通信延迟 (提速 500x)
+        table_data = self.driver.execute_script("""
+            var rows = document.querySelectorAll("table tr");
+            var res = [];
+            for (var i = 0; i < rows.length; i++) {
+                var cells = rows[i].querySelectorAll("td");
+                if (cells.length >= 4) {
+                    var noTxt = cells[0].innerText.trim();
+                    var dateTxt = cells[1].innerText.trim();
+                    var compTxt = cells[2].innerText.trim();
+                    var errorMsg = cells[3].innerText.trim();
+                    if (errorMsg && errorMsg.indexOf("Error Message") === -1) {
+                        res.push([noTxt, dateTxt, compTxt, errorMsg]);
+                    }
+                }
+            }
+            return res;
+        """)
 
         server_logs = {}
-        for row in rows:
-            cells = row.find_elements(By.TAG_NAME, "td")
-            if len(cells) >= 4:
-                no_txt = cells[0].text.strip()
-                date_txt = cells[1].text.strip()
-                comp_txt = cells[2].text.strip()
-                error_msg = cells[3].text.strip()
-                
-                if error_msg and "Error Message" not in error_msg:
-                    if error_msg not in server_logs:
-                        formatted_line = f"{no_txt}\t{date_txt}\t{comp_txt}\t{error_msg}\n"
-                        server_logs[error_msg] = formatted_line
+        for item in (table_data or []):
+            no_txt, date_txt, comp_txt, error_msg = item
+            if error_msg not in server_logs:
+                formatted_line = f"{no_txt}\t{date_txt}\t{comp_txt}\t{error_msg}\n"
+                server_logs[error_msg] = formatted_line
         
         if server_logs:
             with open(self.output_file, "a", encoding="utf-8") as f:
@@ -287,7 +299,7 @@ class ErrorLogScraperService:
         if self.driver:
             try:
                 self.driver.switch_to.default_content()
-                self.driver.get(f"http://{self.auth_user}:{self.auth_pass}@10.16.250.9/ubah/index.php?p=main_system")
+                self.driver.get(f"http://{self.auth_user}:{self.auth_pass}@{urlparse(self.base_url).hostname}/ubah/index.php?p=main_system")
             except Exception:
                 pass
         self.success = True

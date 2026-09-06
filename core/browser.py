@@ -39,7 +39,7 @@ class BrowserManager:
         config = load_config()
         target_url = url or config.get("LOGIN_URL", "http://10.16.250.9/ubah/index.php?")
 
-        local_driver = Path.cwd() / "chromedriver.exe"
+        local_driver = Path(__file__).resolve().parent.parent / "chromedriver.exe"
         service = Service(executable_path=str(local_driver)) if local_driver.exists() else None
 
         # 1. 优先复用当前 Python 进程已有的 Driver 句柄
@@ -82,7 +82,7 @@ class BrowserManager:
             if target_url.startswith("http://"):
                 auth_url = target_url.replace("http://", f"http://{auth_user}:{auth_pass}@")
             elif target_url.startswith("https://"):
-                auth_url = target_url.replace("https://", f"https://{auth_pass}@")
+                auth_url = target_url.replace("https://", f"https://{auth_user}:{auth_pass}@")
             else:
                 auth_url = target_url
 

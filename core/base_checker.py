@@ -1,9 +1,8 @@
-import sys
 import time
-import traceback
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from core.checkpoint_store import CheckpointStore
 
 class BaseChecker:
     """
@@ -89,50 +88,67 @@ class BaseChecker:
 
     def log_check_result(self, is_success: bool, summary_msg: str):
         """
-        打印最终判定结论，并自动写入桌面 .txt 日志文件 (PageLogger)
+        打印最终判定结论
         """
         if is_success:
             self.log(f"[CHECK RESULT] SUCCESS: {summary_msg}")
         else:
             self.log(f"[CHECK RESULT] FAILED: {summary_msg}")
 
-        # 1. 自动写入桌面 .txt 分页日志
-        try:
-            from core.page_logger import PageLogger
-            page_key = getattr(self, "_current_page_key", None)
-            if not page_key:
-                # 尝试根据 station_id 推导 page_key
-                sid = getattr(self, "_current_station_id", "")
-                station_name = getattr(self, "_current_station_name", "")
-                page_key = self._infer_page_key(sid, station_name)
+    # --------------------------------------------------------------------------------
+    # 通用关卡执行与结果提交闭环助手
+    # --------------------------------------------------------------------------------
+    def prepare_station(self, title: str, menu_id: str, section: str = "NIW", wait_sec: float = 2.0):
+        """[通用准备] 打印站头并导航进入指定关卡菜单"""
+        self.log_station_header(title, menu_id=menu_id)
+        self.navigate_to_menu(title, menu_id=menu_id, section=section, wait_seconds=wait_sec)
+        self.wait_for_page_loaded(seconds=wait_sec, max_wait=30)
 
-            if page_key:
-                PageLogger.write_page_log(
-                    page_key=page_key,
-                    station_name=getattr(self, "_current_station_name", "巡检关卡"),
-                    is_success=is_success,
-                    raw_lines=getattr(self, "_current_log_buffer", [summary_msg]),
-                    table_headers=getattr(self, "_current_table_headers", None),
-                    table_rows=getattr(self, "_current_table_rows", None)
-                )
-        except Exception:
-            pass
+    def finish_success(self, page_key: str, title: str, summary_msg: str,
+                       headers: list = None, rows: list = None, tables: list = None,
+                       click_cp: bool = True) -> bool:
+        """[通用通关] 打印成功日志、保存 CheckpointStore 并点击 Check Point 按钮"""
+        self.log_check_result(True, summary_msg)
+        CheckpointStore.save(
+            page_key=page_key,
+            title=title,
+            status=True,
+            headers=headers,
+            rows=rows,
+            tables=tables,
+            summary=summary_msg
+        )
+        if click_cp:
+            self.click_checkpoint()
+        return True
 
-    def _infer_page_key(self, menu_id: str, station_name: str) -> str | None:
-        """内部工具: 根据 menu_id 或站名自动匹配 page_key"""
-        menu_map = {
-            "apy_b0i2text": "niw_01", "apy_b0i3text": "niw_02", "apy_b0i4text": "niw_03",
-            "apy_b0i5text": "niw_04", "apy_b0i6text": "niw_05", "apy_b0i7text": "niw_06",
-            "apy_b0i8text": "niw_07", "apy_b0i9text": "niw_08", "apy_b0i10text": "niw_09",
-            "apy_b0i11text": "niw_10", "apy_b0i13text": "niw_11", "apy_b0i14text": "niw_12",
-            "apy_b0i15text": "niw_13", "apy_b0i16text": "niw_14", "apy_b0i17text": "niw_15",
-            "apy_b0i19text": "copier_01", "apy_b0i20text": "copier_02", "apy_b0i21text": "copier_03",
-            "apy_b0i22text": "copier_04", "apy_b0i23text": "copier_05", "apy_b0i24text": "copier_06",
-            "apy_b0i25text": "copier_07", "apy_b0i26text": "copier_08", "apy_b0i27text": "copier_09",
-        }
-        if menu_id in menu_map:
-            return menu_map[menu_id]
-        return None
+    def finish_failed(self, page_key: str, title: str, summary_msg: str,
+                      headers: list = None, rows: list = None, tables: list = None) -> bool:
+        """[通用失败] 打印失败日志并保存 CheckpointStore（不点击 Check Point）"""
+        self.log_check_result(False, summary_msg)
+        CheckpointStore.save(
+            page_key=page_key,
+            title=title,
+            status=False,
+            headers=headers,
+            rows=rows,
+            tables=tables,
+            summary=summary_msg
+        )
+        return False
+
+    def handle_exception(self, page_key: str, title: str, e: Exception) -> bool:
+        """[通用异常兜底] 统一捕获异常、打印错误并记录到 CheckpointStore"""
+        self.log_check_result(False, f"{title} 检查出现异常: {e}")
+        CheckpointStore.save(
+            page_key=page_key,
+            title=title,
+            status=False,
+            headers=["Error"],
+            rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+            summary="Exception during check"
+        )
+        return False
 
     # --------------------------------------------------------------------------------
     # 浏览器 Frame 框架切换组件

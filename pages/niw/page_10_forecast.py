@@ -33,6 +33,7 @@
 
 import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class ForecastChecker(BaseChecker):
     def check(self) -> bool:
@@ -122,7 +123,7 @@ class ForecastChecker(BaseChecker):
 
                         # 5.2 滚动到目标单元格并点击其 <a> 标签，唤醒 Details 弹窗
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();", anchor_el)
-                        time.sleep(2.0) # 保持 2.0 秒缓冲，让 Details 弹窗彻底拉开，真人肉眼清晰可见！
+                        self.wait_for_page_loaded(seconds=1, max_wait=5)  # 智能等待 Details 弹窗拉开并渲染完毕
 
                         # 驱动层双重防线：如果有遗留原生 Alert，直接 accept 确认掉
                         try:
@@ -170,7 +171,7 @@ class ForecastChecker(BaseChecker):
                                 break
 
                             patched_count += 1
-                            time.sleep(0.9) # 稳健的 0.9 秒等待：确保网络请求完成、页面刷新为 processing 黄底，人眼看得清清楚楚！
+                            self.wait_for_page_loaded(seconds=0.5, max_wait=3)  # 智能等待 Patch 请求完成并变黄
 
                         patch_logs.append(f"{sat} (列{col_idx}): 已唤醒 Details 弹窗并成功完成 100% 无遗漏全量 {patched_count} 项 Patch 点击 [Tier 2 提醒/肉眼可见已补丁/不阻断]")
 
@@ -185,7 +186,7 @@ class ForecastChecker(BaseChecker):
                                 }
                             }
                         """)
-                        time.sleep(1.0) # 等待弹窗关闭动画
+                        self.wait_for_page_loaded(seconds=0.5, max_wait=3)  # 智能等待弹窗关闭动画完成
 
                     except Exception as pe:
                         # 容错处理：确保即使单个单元格异常也不影响后续流程
@@ -238,6 +239,16 @@ class ForecastChecker(BaseChecker):
 
                                     var line = com + " (" + type + "): Online List = " + online + ", Betslips = " + betslips + ", Remark = " + remark + statusTag;
                                     result.rightRows.push(line);
+                                    result.rawRows = result.rawRows || [];
+                                    result.rawRows.push({
+                                        company: com,
+                                        type: type,
+                                        online: online,
+                                        betslips: betslips,
+                                        remark: remark,
+                                        status: isRemarkErr ? "ERROR" : "OK",
+                                        is_error: isRemarkErr
+                                    });
                                 }
                             }
                         });
@@ -249,6 +260,7 @@ class ForecastChecker(BaseChecker):
 
             cat_name = p10_data.get("leftCategory", "RCM")
             right_rows = p10_data.get("rightRows", [])
+            raw_rows = p10_data.get("rawRows", [])
             right_errs = p10_data.get("rightErrList", [])
 
             self.log_data_extracted(f"成功抓取 Forecast ({cat_name}) 数据 | 左侧 100% 零遗漏 Patch: {len(error_anchors)} 个红底单元格 (Tier 2) | 右侧监控节点: {len(right_rows)} 项 (Tier 1)")
@@ -269,9 +281,30 @@ class ForecastChecker(BaseChecker):
 
             self.log_data_summary(summary_lines)
 
+            table_headers = ["Company", "Type", "Online List", "Betslips", "Remark", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["company"]),
+                    CheckpointStore.make_cell(r["type"]),
+                    CheckpointStore.make_cell(r["online"]),
+                    CheckpointStore.make_cell(r["betslips"]),
+                    CheckpointStore.make_cell(r["remark"], bg="red" if r.get("is_error") else "green"),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # [步骤 8] Tier 1 报错阻断判定 (仅针对右侧 NASA Remark 非 Correct)
             if len(right_errs) > 0:
                 self.log_check_result(False, f"Forecast 巡检发现 Tier 1 致命异常: 右侧 NASA Compare 存在 {len(right_errs)} 项 Remark 非 Correct，强阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_10",
+                    title="Forecast",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"Right NASA Errors: {len(right_errs)}"
+                )
                 return False
 
             if error_anchors:
@@ -281,8 +314,24 @@ class ForecastChecker(BaseChecker):
 
             # [步骤 9] 解封并自动点击 Checkpoint 按钮
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_10",
+                title="Forecast",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"右侧 {len(raw_rows)} 个节点全部 Correct，左侧已完成 Patch"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Forecast 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_10",
+                title="Forecast",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

@@ -11,8 +11,8 @@
 import json
 from pathlib import Path
 
-# 配置文件路径: 存储在当前项目根目录下的 config.json
-CONFIG_FILE = Path.cwd() / "config.json"
+# 配置文件路径: 存储在项目根目录下的 config.json (使用 __file__ 而非 cwd 确保路径稳定)
+CONFIG_FILE = Path(__file__).resolve().parent / "config.json"
 
 # 默认配置字典
 DEFAULT_CONFIG = {
@@ -31,7 +31,7 @@ def load_config() -> dict:
     """
     if not CONFIG_FILE.exists():
         save_config(DEFAULT_CONFIG)
-        return DEFAULT_CONFIG
+        return DEFAULT_CONFIG.copy()
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -41,7 +41,7 @@ def load_config() -> dict:
                     cfg[k] = v
             return cfg
     except Exception:
-        return DEFAULT_CONFIG
+        return DEFAULT_CONFIG.copy()
 
 def save_config(cfg: dict):
     """

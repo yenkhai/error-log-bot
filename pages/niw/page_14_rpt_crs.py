@@ -21,7 +21,7 @@
 
 import time
 from core.base_checker import BaseChecker
-
+from core.checkpoint_store import CheckpointStore
 
 class RPTCRSChecker(BaseChecker):
     def check(self) -> bool:
@@ -99,8 +99,9 @@ class RPTCRSChecker(BaseChecker):
             p14_data = self.driver.execute_script("""
                 var result = {
                     category: "RCM",
-                    sections: [],
                     allRows: [],
+                    matrixRows: [],
+                    headerCols: [],
                     tier1ErrorCount: 0,
                     unloadedCount: 0,
                     errList: []
@@ -161,7 +162,9 @@ class RPTCRSChecker(BaseChecker):
                                     cells.push(cellTxt === "" ? "[未加载/空]" : cellTxt);
                                 }
 
-                                if (!isHeader && cells.length > 0 && cells[0] !== "[未加载/空]") {
+                                if (isHeader && result.headerCols.length === 0) {
+                                    result.headerCols = cells;
+                                } else if (!isHeader && cells.length > 0 && cells[0] !== "[未加载/空]") {
                                     var lineText = cells.join(" | ");
                                     var statusTag = " [OK/正常]";
 
@@ -177,6 +180,7 @@ class RPTCRSChecker(BaseChecker):
                                     }
 
                                     result.allRows.push(lineText + statusTag);
+                                    result.matrixRows.push(cells);
                                 }
                             }
                         });
@@ -188,6 +192,8 @@ class RPTCRSChecker(BaseChecker):
 
             cat_name = p14_data.get("category", "RCM")
             all_rows = p14_data.get("allRows", [])
+            matrix_rows = p14_data.get("matrixRows", [])
+            header_cols = p14_data.get("headerCols", [])
             tier1_errors = p14_data.get("tier1ErrorCount", 0)
             unloaded_cnt = p14_data.get("unloadedCount", 0)
             err_list = p14_data.get("errList", [])
@@ -204,6 +210,14 @@ class RPTCRSChecker(BaseChecker):
             self.log_check_method("智能动态轮询等待 AJAX 100% 加载完毕 -> 严格校验每一个区间节点的同步状态 (必须为 ok 或 -，出现 error、红字或空白未加载均直接 Tier 1 阻断)")
             self.log_data_summary(all_summary)
 
+            table_headers = header_cols if header_cols else ["Item", "Status / Values"]
+            table_rows = [
+                [CheckpointStore.make_cell(str(c)) for c in r]
+                for r in matrix_rows
+            ] if matrix_rows else [
+                [CheckpointStore.make_cell(r)] for r in all_rows
+            ]
+
             # 5. Checkpoint 巡检结论判定
             if tier1_errors > 0:
                 if unloaded_cnt > 0:
@@ -212,14 +226,38 @@ class RPTCRSChecker(BaseChecker):
                     self.log(f"[Error] RPT CRS 检测到 {tier1_errors - unloaded_cnt} 项节点状态为 error/红字异常，阻断 Checkpoint！")
                 
                 self.log_check_result(False, f"RPT CRS 存在 {tier1_errors} 项 Tier 1 异常 ({', '.join(err_list[:3])})，阻断 Checkpoint。")
+                CheckpointStore.save(
+                    page_key="niw_14",
+                    title="RPT CRS",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"Tier 1 errors: {tier1_errors}, Unloaded: {unloaded_cnt}"
+                )
                 return False
             else:
                 self.log_check_result(True, "RPT CRS 全部区间节点数据 100% 加载完毕且同步状态完全正常！")
 
             # 6. 巡检通过，点击 Checkpoint 提交通关
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_14",
+                title="RPT CRS",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全部 {len(matrix_rows)} 个核算节点全部正常"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"RPT CRS 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_14",
+                title="RPT CRS",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

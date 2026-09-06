@@ -19,9 +19,8 @@
 ================================================================================
 """
 
-import time
-from selenium.webdriver.common.by import By
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class CalculateBetslipsChecker(BaseChecker):
     def check(self) -> bool:
@@ -51,6 +50,7 @@ class CalculateBetslipsChecker(BaseChecker):
             self.log(f"[COMPANY DISCOVERY] 成功搜索到 {len(companies)} 家公司选项，启动全量循环扫描...")
 
             problem_companies_summary = []
+            all_company_rows = []
             total_uncalc_all = 0
             total_recalc_err_all = 0
             has_any_tier1_error = False
@@ -92,7 +92,6 @@ class CalculateBetslipsChecker(BaseChecker):
                     var tables = document.querySelectorAll("table");
 
                     tables.forEach(function(t) {
-                        // 核心隔离: 过滤 Datepicker 日历控件与嵌套表
                         if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null || t.querySelector("table") !== null) {
                             return;
                         }
@@ -114,7 +113,6 @@ class CalculateBetslipsChecker(BaseChecker):
                             if (tds.length >= 8) {
                                 var bettype = tds[0].innerText.trim();
 
-                                // 排除表头与 No Data 行
                                 if (bettype && bettype !== "Bettype" && bettype.indexOf("Bettype") === -1 && bettype.indexOf("Member") === -1 && bettype.indexOf("Total") === -1 && textAll.indexOf("No Data") === -1) {
                                     var cancel = tds[tds.length - 3] ? tds[tds.length - 3].innerText.trim() : "0";
                                     var uncalc = tds[tds.length - 2] ? tds[tds.length - 2].innerText.trim() : "0";
@@ -156,10 +154,20 @@ class CalculateBetslipsChecker(BaseChecker):
                     return result;
                 """, comp_val, comp_text)
 
-                if comp_data.get("hasTier1Error"):
+                u_sum = comp_data.get("uncalculateTotal", 0)
+                r_err_sum = comp_data.get("recalculateErrTotal", 0)
+                is_comp_err = comp_data.get("hasTier1Error", False)
+
+                all_company_rows.append({
+                    "company": comp_text,
+                    "uncalc": u_sum,
+                    "recalc": "OK" if r_err_sum == 0 else f"Err({r_err_sum})",
+                    "status": "ERROR" if is_comp_err else "OK",
+                    "is_error": is_comp_err
+                })
+
+                if is_comp_err:
                     has_any_tier1_error = True
-                    u_sum = comp_data.get("uncalculateTotal", 0)
-                    r_err_sum = comp_data.get("recalculateErrTotal", 0)
                     total_uncalc_all += u_sum
                     total_recalc_err_all += r_err_sum
 
@@ -175,9 +183,28 @@ class CalculateBetslipsChecker(BaseChecker):
             self.log_data_extracted(f"成功完成全部 {len(companies)} 家公司的全量巡检扫描！")
             self.log_check_method("全量公司遍历 + 显式视觉渲染等待 (0.8s) + Datepicker 日历表隔离 -> 校验 Uncalculate > 0 或 Recalculate != OK 为 Tier 1 报错阻断")
 
+            table_headers = ["Company", "Uncalculate", "Recalculate", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["company"]),
+                    CheckpointStore.make_cell(str(r["uncalc"]), bg="red" if r["uncalc"] > 0 else "green"),
+                    CheckpointStore.make_cell(r["recalc"], bg="red" if r["is_error"] and r["recalc"] != "OK" else "green"),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r["is_error"] else "green")
+                ]
+                for r in all_company_rows
+            ]
+
             if has_any_tier1_error:
                 self.log_data_summary(problem_companies_summary)
                 self.log_check_result(False, f"Calculate Betslips 巡检中发现异常公司，存在 Uncalculate 未计算或 Recalculate 异常，阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_05",
+                    title="Calculate Betslips",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"异常: Uncalc={total_uncalc_all}, RecalcErr={total_recalc_err_all}"
+                )
                 return False
             else:
                 self.log_data_summary([f"Calculate Betslips 全部 {len(companies)} 家公司巡检完毕: 所有公司的 Uncalculate 均为 0 且 Recalculate 均为 OK 绿底！[全部正常]"])
@@ -185,8 +212,24 @@ class CalculateBetslipsChecker(BaseChecker):
 
             # 5. 解封并点击 Checkpoint 按钮
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_05",
+                title="Calculate Betslips",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全部 {len(companies)} 家公司全部 0 积压正常"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Calculate Betslips 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_05",
+                title="Calculate Betslips",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

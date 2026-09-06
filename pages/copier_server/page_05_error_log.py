@@ -24,8 +24,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class ErrorLogChecker(BaseChecker):
@@ -40,8 +40,7 @@ class ErrorLogChecker(BaseChecker):
             error_data = self.driver.execute_script("""
                 var result = {
                     servers: [],      // 所有服务器行数据
-                    tier1Count: 0,    // Total >= 1000 Records 的严重错误数
-                    tier3Count: 0,    // Total > 0 但 < 1000 的警告提醒数
+                    tier3Count: 0,    // Total > 0 的警告提醒数
                     okCount: 0,       // No Error 正常数
                     totalCount: 0
                 };
@@ -118,7 +117,6 @@ class ErrorLogChecker(BaseChecker):
             """)
 
             servers     = error_data.get("servers", [])
-            tier1_count = error_data.get("tier1Count", 0)
             tier3_count = error_data.get("tier3Count", 0)
             ok_count    = error_data.get("okCount", 0)
             total_count = error_data.get("totalCount", 0)
@@ -137,16 +135,22 @@ class ErrorLogChecker(BaseChecker):
             summary_lines = ["【Error Log 全量巡检数据明细】:"]
             summary_lines.append(f"--- [Error Log 服务器状态列表 (共 {total_count} 台)] ---")
 
-            tier1_list = []
             tier3_list = []
+            
+            headers = ["Server", "Total"]
+            rows = []
 
             for srv in servers:
                 line = f"{srv['server']} | Total: {srv['total']}{srv['tag']}"
                 summary_lines.append(f"   * {line}")
+                
+                bg = "red" if srv["tier"] in ("TIER3", "TIER3_HIGH", "UNKNOWN") else "green"
+                rows.append([
+                    srv['server'],
+                    CheckpointStore.make_cell(srv['total'], bg)
+                ])
 
-                if srv["tier"] == "TIER1":
-                    tier1_list.append(f"{srv['server']} ({srv['total']})")
-                elif srv["tier"] == "TIER3":
+                if srv["tier"] == "TIER3" or srv["tier"] == "TIER3_HIGH":
                     tier3_list.append(f"{srv['server']} ({srv['total']})")
 
             if not servers:
@@ -156,8 +160,7 @@ class ErrorLogChecker(BaseChecker):
             summary_lines.append(f"")
             summary_lines.append(f"--- [汇总统计] ---")
             summary_lines.append(f"   * OK (No Error): {ok_count} 台")
-            summary_lines.append(f"   * Tier 3 提醒 (1 ~ 999 Records): {tier3_count} 台")
-            summary_lines.append(f"   * Tier 1 致命 (>= 1000 Records): {tier1_count} 台")
+            summary_lines.append(f"   * Tier 3 提醒 (> 0 Records): {tier3_count} 台")
 
             self.log_data_summary(summary_lines)
 
@@ -168,17 +171,29 @@ class ErrorLogChecker(BaseChecker):
                     self.log(f"   [WARN] {item}")
 
             # [步骤 5] 巡检完成，不阻断 Checkpoint
-            self.log_check_result(
-                True,
-                f"Error Log 巡检通过！(OK: {ok_count} 台"
-                + (f"，Tier 3 提醒: {tier3_count} 台" if tier3_count > 0 else "")
-                + ")，无阻断问题！"
-            )
+            msg = f"Error Log 巡检通过！(OK: {ok_count} 台" + (f"，Tier 3 提醒: {tier3_count} 台" if tier3_count > 0 else "") + ")，无阻断问题！"
+            self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_05",
+                title="Error Log",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 6] 点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Error Log 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_05",
+                title="Error Log",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

@@ -17,9 +17,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
-
+from core.checkpoint_store import CheckpointStore
 
 class OneWalletPendingChecker(BaseChecker):
     def check(self) -> bool:
@@ -208,6 +207,14 @@ class OneWalletPendingChecker(BaseChecker):
                 if right_warn > 0:
                     self.log(f"[Warn] 同时右侧存在 {right_warn} 项 Tier 3 提示 (仅通知不阻断)")
                 self.log_check_result(False, f"1 Wallet Pending 左侧存在 {left_err} 项 120s 超时积压，阻断 Checkpoint。")
+                CheckpointStore.save(
+                    page_key="niw_15",
+                    title="1 Wallet Pending",
+                    status=False,
+                    headers=t_headers,
+                    rows=[[CheckpointStore.make_cell(str(c)) for c in r] for r in t_rows],
+                    summary=f"Tier 1 errors: {left_err}, Tier 3 warnings: {right_warn}"
+                )
                 return False
             else:
                 if right_warn > 0:
@@ -216,8 +223,24 @@ class OneWalletPendingChecker(BaseChecker):
 
             # 6. 点击 Checkpoint 打勾提交
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_15",
+                title="1 Wallet Pending",
+                status=True,
+                headers=t_headers,
+                rows=[[CheckpointStore.make_cell(str(c)) for c in r] for r in t_rows],
+                summary=f"Tier 3 warnings: {right_warn}" if right_warn > 0 else "All Pending APIs clear"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"1 Wallet Pending 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_15",
+                title="1 Wallet Pending",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

@@ -11,9 +11,9 @@
 ================================================================================
 """
 
-import time
 from selenium.webdriver.common.by import By
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class CCLRecoverChecker(BaseChecker):
     def check(self) -> bool:
@@ -38,11 +38,11 @@ class CCLRecoverChecker(BaseChecker):
                 var tables = document.querySelectorAll("table");
                 var allDetails = [];
                 var errorDetails = [];
+                var rawRows = [];
                 var totalSatellites = 0;
                 var errorCount = 0;
 
                 for (var t = 0; t < tables.length; t++) {
-                    // 公司名称作用域置于表格级别，实现跨行 (rowspan) 状态继承
                     var currentCompany = (t === 3) ? "LRCM" : "RCM";
                     var rows = tables[t].querySelectorAll("tr");
 
@@ -53,12 +53,8 @@ class CCLRecoverChecker(BaseChecker):
                             var satText = "";
                             var timeTd = null;
 
-                            // 动态识别公司文本 (若包含 LRCM / RCM 则更新当前公司标记)
                             for (var c = 0; c < tds.length; c++) {
                                 var txt = tds[c].innerText.trim();
-                                //if (txt === "LRCM") currentCompany = "LRCM";
-                                //if (txt === "RCM") currentCompany = "RCM";
-
                                 if (txt.indexOf("nv") !== -1 || txt.indexOf("-") !== -1) {
                                     satText = txt;
                                     if (c + 1 < tds.length) {
@@ -74,7 +70,6 @@ class CCLRecoverChecker(BaseChecker):
                                 var style = window.getComputedStyle(timeTd);
                                 var bg = style.backgroundColor;
                                 
-                                // 提取 RGB 原色判定
                                 var isRed = false;
                                 var isGreen = false;
 
@@ -84,9 +79,7 @@ class CCLRecoverChecker(BaseChecker):
                                     var green = parseInt(bgMatch[2]);
                                     var blue = parseInt(bgMatch[3]);
 
-                                    // 绿底 (Green > 120 且 Red < 100)
                                     if (green > 120 && red < 100) isGreen = true;
-                                    // 红底 (Red >= 170 且 Green <= 110 且 Blue <= 110)
                                     if (red >= 170 && green <= 110 && blue <= 110) isRed = true;
                                 }
 
@@ -94,6 +87,15 @@ class CCLRecoverChecker(BaseChecker):
                                 var isError = isRed || lowerTime.includes("error") || lowerTime.includes("missing") || (!isGreen && timeText === "");
 
                                 var itemStr = currentCompany + ": " + satText + " -> Last Recover: " + (timeText || "N/A");
+                                var statusStr = isError ? "ERROR/红底异常" : "OK/正常";
+
+                                rawRows.push({
+                                    company: currentCompany,
+                                    satellite: satText,
+                                    last_recover: timeText || "N/A",
+                                    status: statusStr,
+                                    is_error: isError
+                                });
 
                                 if (isError) {
                                     errorCount++;
@@ -109,6 +111,7 @@ class CCLRecoverChecker(BaseChecker):
                 return {
                     allDetails: allDetails,
                     errorDetails: errorDetails,
+                    rawRows: rawRows,
                     totalSatellites: totalSatellites,
                     errorCount: errorCount
                 };
@@ -116,6 +119,7 @@ class CCLRecoverChecker(BaseChecker):
 
             all_details = ccl_data.get("allDetails", [])
             error_details = ccl_data.get("errorDetails", [])
+            raw_rows = ccl_data.get("rawRows", [])
             total_satellites = ccl_data.get("totalSatellites", 0)
             error_count = ccl_data.get("errorCount", 0)
 
@@ -125,20 +129,55 @@ class CCLRecoverChecker(BaseChecker):
             # 4. 【核心需求】：无论有没有 error，一律打印完整数据明细！
             self.log_data_summary([f"【CCL Recover 全量 Satellite 恢复状态明细 (共 {total_satellites} 个节点)】:"] + [f"   * {item}" for item in all_details])
 
+            table_headers = ["Company", "Satellite", "Last Recover", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["company"]),
+                    CheckpointStore.make_cell(r["satellite"]),
+                    CheckpointStore.make_cell(r["last_recover"], bg="red" if r.get("is_error") else "green"),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # 5. 判定结果
             if error_count > 0:
                 self.log(f"[Error] CCL Recover 发现 {error_count} 个 Satellite 处于异常/红底状态:")
                 for err in error_details:
                     self.log(f"  - {err}")
                 self.log_check_result(False, "CCL Recover [Error] 发现非绿底/红底异常")
+                CheckpointStore.save(
+                    page_key="niw_02",
+                    title="CCL Recover",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"{error_count} 个节点红底异常 (共 {total_satellites} 个)"
+                )
                 return False
             else:
                 self.log_check_result(True, f"CCL Recover 巡检通过，全表 {total_satellites} 个 Satellite 全部显示绿底正常。")
 
             # 6. 解封并点击 Checkpoint 打勾按钮
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_02",
+                title="CCL Recover",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全表 {total_satellites} 个 Satellite 全部绿底正常"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"CCL Recover 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_02",
+                title="CCL Recover",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

@@ -20,8 +20,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class RedisServerChecker(BaseChecker):
@@ -123,10 +123,20 @@ class RedisServerChecker(BaseChecker):
             summary_lines.append(f"--- [Redis 服务器状态列表 (共 {total_count} 台)] ---")
 
             error_list = []
+            
+            headers = ["Server", "Remark", "Total"]
+            rows = []
 
             for srv in servers:
                 line = f"{srv['server']} | Remark: {srv['remark']} | Total: {srv['total']}{srv['tag']}"
                 summary_lines.append(f"   * {line}")
+                
+                bg = "red" if srv["tier"] == "TIER1" else "green"
+                rows.append([
+                    srv['server'],
+                    srv['remark'],
+                    CheckpointStore.make_cell(srv['total'], bg)
+                ])
 
                 if srv["tier"] == "TIER1":
                     error_list.append(f"{srv['server']} (Total={srv['total']})")
@@ -143,21 +153,41 @@ class RedisServerChecker(BaseChecker):
 
             # [步骤 4] Tier 1 判定
             if error_count > 0:
-                self.log_check_result(
-                    False,
-                    f"Redis Server 发现 {error_count} 台服务器 Total 非 'No Error'，Tier 1 致命阻断！({', '.join(error_list)})"
+                msg = f"Redis Server 发现 {error_count} 台服务器 Total 非 'No Error'，Tier 1 致命阻断！({', '.join(error_list)})"
+                self.log_check_result(False, msg)
+                CheckpointStore.save(
+                    page_key="copier_06",
+                    title="Redis Server",
+                    status=False,
+                    headers=headers,
+                    rows=rows,
+                    summary=msg
                 )
                 return False
             else:
-                self.log_check_result(
-                    True,
-                    f"Redis Server 全部 {total_count} 台服务器 Total 均为 'No Error'，巡检通过！"
-                )
+                msg = f"Redis Server 全部 {total_count} 台服务器 Total 均为 'No Error'，巡检通过！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_06",
+                title="Redis Server",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 5] 巡检通过，点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Redis Server 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_06",
+                title="Redis Server",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

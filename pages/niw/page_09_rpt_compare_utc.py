@@ -15,8 +15,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class RPTCompareUTCChecker(BaseChecker):
     def check(self) -> bool:
@@ -77,7 +77,6 @@ class RPTCompareUTCChecker(BaseChecker):
 
                             if (hourVal && (typeVal === "sport" || !isNaN(parseInt(hourVal)))) {
                                 result.hoursCount++;
-                                var cellStatuses = [];
                                 var rowHasErr = false;
 
                                 for (var c = dateStartIdx; c < tds.length; c++) {
@@ -98,6 +97,13 @@ class RPTCompareUTCChecker(BaseChecker):
 
                                 var line = "Hour " + hourVal + " (" + typeVal + "): 单元格校验通过 " + statusTag;
                                 result.hourRows.push(line);
+                                result.rawRows = result.rawRows || [];
+                                result.rawRows.push({
+                                    hour: "Hour " + hourVal,
+                                    type: typeVal,
+                                    status: rowHasErr ? "ERROR" : "OK",
+                                    is_error: rowHasErr
+                                });
                             }
                         }
                     });
@@ -111,6 +117,7 @@ class RPTCompareUTCChecker(BaseChecker):
             total_ok = p9_data.get("totalOkCount", 0)
             err_list = p9_data.get("errList", [])
             hour_rows = p9_data.get("hourRows", [])
+            raw_rows = p9_data.get("rawRows", [])
 
             self.log_data_extracted(f"成功抓取 RPT Compare UTC ({cat_name}) 数据矩阵 ({hours_count} 个时间段 00~23) | 'ok' 单元格: {total_ok} 个 | 异常单元格: {len(err_list)} 个")
             self.log_check_method("全量核对 24 小时 (00~23) 在各个日期与 Satellite 节点下 UTC Curr, PL, Odd 子列状态 ( Tier 1 阻断规则 )")
@@ -120,17 +127,51 @@ class RPTCompareUTCChecker(BaseChecker):
             summary_lines.extend([f"   * {row}" for row in hour_rows])
             self.log_data_summary(summary_lines)
 
+            table_headers = ["Hour Segment", "Type", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["hour"]),
+                    CheckpointStore.make_cell(r["type"]),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # 5. Tier 1 报错阻断判定
             if len(err_list) > 0:
                 self.log_check_result(False, f"RPT Compare UTC 巡检发现 {len(err_list)} 处非 ok/红底异常单元格，强阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_09",
+                    title="RPT Compare UTC",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"Total OK: {total_ok} | Errors: {len(err_list)}"
+                )
                 return False
             else:
                 self.log_check_result(True, f"RPT Compare UTC 全部 24 个时间段 (00~23) 跨度下所有子列均显示 'ok' 绿底，巡检合格！")
 
             # 6. 解封并点击 Checkpoint 按钮
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_09",
+                title="RPT Compare UTC",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全部 24 个时间段 (00~23) 全部绿底 ok"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"RPT Compare UTC 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_09",
+                title="RPT Compare UTC",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

@@ -15,8 +15,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class HGPercentagesChecker(BaseChecker):
     def check(self) -> bool:
@@ -33,6 +33,7 @@ class HGPercentagesChecker(BaseChecker):
                 var result = {
                     category: "RCM",
                     rows: [],
+                    rawRows: [],
                     errCount: 0,
                     errList: []
                 };
@@ -73,6 +74,15 @@ class HGPercentagesChecker(BaseChecker):
 
                                     var line = com + ": Count(Editor) = " + cEditor + ", Editor = " + editor + ", Count(Betting) = " + cBetting + ", Betting = " + betting + tag;
                                     result.rows.push(line);
+                                    result.rawRows.push({
+                                        company: com,
+                                        c_editor: cEditor,
+                                        editor: editor,
+                                        c_betting: cBetting,
+                                        betting: betting,
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         });
@@ -84,6 +94,7 @@ class HGPercentagesChecker(BaseChecker):
 
             cat_name = p13_data.get("category", "RCM")
             rows = p13_data.get("rows", [])
+            raw_rows = p13_data.get("rawRows", [])
             err_count = p13_data.get("errCount", 0)
             err_list = p13_data.get("errList", [])
 
@@ -99,18 +110,55 @@ class HGPercentagesChecker(BaseChecker):
 
             self.log_data_summary(summary_lines)
 
+            table_headers = ["Company", "Count (Editor)", "Editor", "Count (Betting)", "Betting", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["company"]),
+                    CheckpointStore.make_cell(r["c_editor"]),
+                    CheckpointStore.make_cell(r["editor"], bg="red" if r.get("is_error") and r["editor"].lower() != "correct" else "green"),
+                    CheckpointStore.make_cell(r["c_betting"]),
+                    CheckpointStore.make_cell(r["betting"], bg="red" if r.get("is_error") and r["betting"].lower() != "correct" else "green"),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # [步骤 5] Tier 1 报错阻断判定
             # 只要存在 Editor 或 Betting 非 Correct，阻断 Checkpoint
             if err_count > 0:
                 self.log_check_result(False, f"HG Percentages 巡检发现 Tier 1 致命异常: 存在 {err_count} 项节点状态非 Correct ({', '.join(err_list)})，强阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_13",
+                    title="HG Percentages",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"Errors: {err_count}"
+                )
                 return False
             else:
                 self.log_check_result(True, "HG Percentages 全部公司节点 Editor 与 Betting 均为 Correct，状态完全正常！")
 
             # [步骤 6] 解封并自动点击 Checkpoint
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_13",
+                title="HG Percentages",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary="All Correct"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"HG Percentages 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_13",
+                title="HG Percentages",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

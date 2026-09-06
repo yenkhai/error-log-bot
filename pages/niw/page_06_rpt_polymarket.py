@@ -14,8 +14,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class RPTPolyMarketChecker(BaseChecker):
     def check(self) -> bool:
@@ -30,6 +30,7 @@ class RPTPolyMarketChecker(BaseChecker):
                 var result = {
                     categoryName: "RCM",
                     satelliteRows: [],
+                    rawRows: [],
                     totalOkCount: 0,
                     errCount: 0,
                     resetLogTotal: 0
@@ -90,11 +91,19 @@ class RPTPolyMarketChecker(BaseChecker):
                                     var rLogNum = parseInt(resetLog) || 0;
                                     result.resetLogTotal += rLogNum;
 
-                                    var statusTag = " [OK/正常]";
-                                    if (rowHasErr || rLogNum > 0) statusTag = " [ERROR/Tier 1 异常阻断]";
+                                    var isErr = (rowHasErr || rLogNum > 0);
+                                    var statusTag = isErr ? " [ERROR/Tier 1 异常阻断]" : " [OK/正常]";
 
                                     var line = sat + " (" + type + "): Reset Log = " + resetLog + " | 日期状态(05/08~11/08): " + dateStatuses.join(", ") + statusTag;
                                     result.satelliteRows.push(line);
+                                    result.rawRows.push({
+                                        satellite: sat,
+                                        type: type,
+                                        reset_log: resetLog,
+                                        date_status: dateStatuses.join(", "),
+                                        status: isErr ? "ERROR" : "OK",
+                                        is_error: isErr
+                                    });
                                 }
                             }
                         }
@@ -106,6 +115,7 @@ class RPTPolyMarketChecker(BaseChecker):
 
             cat_name = p6_data.get("categoryName", "RCM")
             sat_rows = p6_data.get("satelliteRows", [])
+            raw_rows = p6_data.get("rawRows", [])
             total_ok = p6_data.get("totalOkCount", 0)
             total_err = p6_data.get("errCount", 0)
             reset_sum = p6_data.get("resetLogTotal", 0)
@@ -118,17 +128,53 @@ class RPTPolyMarketChecker(BaseChecker):
             summary_lines.extend([f"   * {row}" for row in sat_rows])
             self.log_data_summary(summary_lines)
 
+            table_headers = ["Satellite", "Type", "Reset Log", "7-Day Dates Status", "Status"]
+            table_rows = [
+                [
+                    CheckpointStore.make_cell(r["satellite"]),
+                    CheckpointStore.make_cell(r["type"]),
+                    CheckpointStore.make_cell(r["reset_log"], bg="red" if int(r["reset_log"] or 0) > 0 else "green"),
+                    CheckpointStore.make_cell(r["date_status"]),
+                    CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
+                ]
+                for r in raw_rows
+            ]
+
             # 4. Tier 1 阻断逻辑判定
             if total_err > 0 or reset_sum > 0:
                 self.log_check_result(False, f"RPT PolyMarket 发现 {total_err} 项日期异常或 Reset Log={reset_sum} > 0，判定为 Tier 1 报错，阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_06",
+                    title="RPT PolyMarket",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"异常: {total_err} 项日期异常, Reset Log={reset_sum}"
+                )
                 return False
             else:
                 self.log_check_result(True, "RPT PolyMarket 所有 Satellite 卫星节点 Reset Log 均为 0 且日期状态全为 ok，巡检合格！")
 
             # 5. 巡检合格，解封并点击 Checkpoint 按钮
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_06",
+                title="RPT PolyMarket",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全部 {len(raw_rows)} 个 Satellite 节点 7 天全部正常"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"RPT PolyMarket 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_06",
+                title="RPT PolyMarket",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e))]],
+                summary="Exception during check"
+            )
             return False

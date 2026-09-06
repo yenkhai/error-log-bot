@@ -19,8 +19,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 class CheckCCLChecker(BaseChecker):
     def check(self) -> bool:
@@ -167,14 +167,44 @@ class CheckCCLChecker(BaseChecker):
             # 如果存在任意 Tier 1 错误，阻断 Checkpoint
             if has_tier1_err:
                 self.log_check_result(False, f"Check CCL 巡检发现 Tier 1 致命异常: {'; '.join(err_reasons)}，强阻断 Checkpoint！")
+                CheckpointStore.save(
+                    page_key="niw_11",
+                    title="Check CCL",
+                    status=False,
+                    headers=["Left Semi Cash", "Right Credit CCL"],
+                    rows=[[
+                        CheckpointStore.make_cell(left_rows[i] if i < len(left_rows) else ""),
+                        CheckpointStore.make_cell(right_rows[i] if i < len(right_rows) else "")
+                    ] for i in range(max(len(left_rows), len(right_rows)))],
+                    summary=f"Left err: {left_err_count}, Right err: {right_err_count}"
+                )
                 return False
             else:
                 self.log_check_result(True, "Check CCL 左右两大 CCL 板块全部公司节点 Error 均为 0，状态完全正常！")
 
             # [步骤 6] 状态完全合格，解封并自动点击 Checkpoint
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_11",
+                title="Check CCL",
+                status=True,
+                headers=["Left Semi Cash", "Right Credit CCL"],
+                rows=[[
+                    CheckpointStore.make_cell(left_rows[i] if i < len(left_rows) else ""),
+                    CheckpointStore.make_cell(right_rows[i] if i < len(right_rows) else "")
+                ] for i in range(max(len(left_rows), len(right_rows)))],
+                summary="All CCL ok"
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Check CCL 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_11",
+                title="Check CCL",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception occurred"
+            )
             return False

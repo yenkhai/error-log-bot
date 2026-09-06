@@ -22,8 +22,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class CheckAPSpaceChecker(BaseChecker):
@@ -132,6 +132,9 @@ class CheckAPSpaceChecker(BaseChecker):
             summary_lines.append(f"--- [磁盘空间使用率明细 (共 {total_count} 台)] ---")
 
             tier3_list = []
+            
+            headers = ["IP", "Size", "Used", "Avail", "Use%"]
+            rows = []
 
             for srv in servers:
                 line = (
@@ -139,6 +142,15 @@ class CheckAPSpaceChecker(BaseChecker):
                     f"Avail: {srv['avail']} | Use%: {srv['usePercent']}%{srv['tag']}"
                 )
                 summary_lines.append(f"   * {line}")
+                
+                bg = "red" if srv["tier"] == "TIER3" else "green"
+                rows.append([
+                    srv['ip'],
+                    srv['size'],
+                    srv['used'],
+                    srv['avail'],
+                    CheckpointStore.make_cell(f"{srv['usePercent']}%", bg)
+                ])
 
                 if srv["tier"] == "TIER3":
                     tier3_list.append(f"{srv['ip']} (Use%={srv['usePercent']}%)")
@@ -159,16 +171,29 @@ class CheckAPSpaceChecker(BaseChecker):
                 self.log(f"[Notice] Check AP Space: {tier3_count} 台服务器 Use% > 80%（Tier 3 提醒，不阻断 Checkpoint）")
 
             # [步骤 5] 磁盘空间无 Tier 1 强阻断，直接通关并点击 Checkpoint
-            self.log_check_result(
-                True,
-                f"Check AP Space 全部 {total_count} 台服务器巡检完毕"
-                + (f"（有 {tier3_count} 台 Use% > 80% Tier 3 提醒，不阻断）" if tier3_count > 0 else "，磁盘空间全部正常") + "！"
-            )
+            msg = f"Check AP Space 全部 {total_count} 台服务器巡检完毕" + (f"（有 {tier3_count} 台 Use% > 80% Tier 3 提醒，不阻断）" if tier3_count > 0 else "，磁盘空间全部正常") + "！"
+            self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_04",
+                title="Check AP Space",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # [步骤 6] 巡检通过，点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Check AP Space 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_04",
+                title="Check AP Space",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

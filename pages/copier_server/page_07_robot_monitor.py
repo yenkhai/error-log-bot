@@ -21,8 +21,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class RobotMonitorChecker(BaseChecker):
@@ -92,10 +92,14 @@ class RobotMonitorChecker(BaseChecker):
             # [步骤 3] 打印所有 Robot ID 与最后更新时间
             summary_lines = ["【Robot Monitor 全量巡检数据明细】:"]
             summary_lines.append(f"--- [Robot 运行状态列表 (共 {total_count} 个)] ---")
+            
+            headers = ["Robot ID", "Details", "TimeStamp"]
+            rows = []
 
             for robot in robots:
                 line = f"Robot ID: {robot['robotId']} | Details: {robot['details']} | TimeStamp: {robot['timestamp']}"
                 summary_lines.append(f"   * {line}")
+                rows.append([robot['robotId'], robot['details'], robot['timestamp']])
 
             if not robots:
                 summary_lines.append("   * (未捕获到任何 Robot 数据，页面可能无 Robot 在运行或结构不符)")
@@ -109,19 +113,32 @@ class RobotMonitorChecker(BaseChecker):
                 self.log(f"[Notice] Robot Monitor 检测到 {len(red_items)} 个红色节点，归类为 Tier 3 提醒（不阻断）")
                 for item in red_items:
                     self.log(f"   [WARN/Tier 3] {item}")
-                self.log_check_result(
-                    True,
-                    f"Robot Monitor 有 {len(red_items)} 个红色节点（Tier 3 提醒，仅 Notify，不阻断）。本站无 Checkpoint，直接通过。"
-                )
+                    rows.append([CheckpointStore.make_cell(str(item), "red"), "RED NODE", ""])
+                msg = f"Robot Monitor 有 {len(red_items)} 个红色节点（Tier 3 提醒，仅 Notify，不阻断）。本站无 Checkpoint，直接通过。"
+                self.log_check_result(True, msg)
             else:
-                self.log_check_result(
-                    True,
-                    f"Robot Monitor 全部 {total_count} 个 Robot 无红色异常，本站无 Checkpoint，巡检正常通过！"
-                )
+                msg = f"Robot Monitor 全部 {total_count} 个 Robot 无红色异常，本站无 Checkpoint，巡检正常通过！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_07",
+                title="Robot Monitor",
+                status=True,
+                headers=headers,
+                rows=rows,
+                summary=msg
+            )
             # ⚠️ 本站无 Checkpoint 按钮，绝对不调用 click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Robot Monitor 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_07",
+                title="Robot Monitor",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

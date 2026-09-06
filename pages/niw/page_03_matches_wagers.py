@@ -23,9 +23,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
-
+from core.checkpoint_store import CheckpointStore
 
 class MatchesWagersChecker(BaseChecker):
     def check(self) -> bool:
@@ -320,12 +319,87 @@ class MatchesWagersChecker(BaseChecker):
             self.log_check_method("全量打印: 先左侧(RCM/LRCM 4 大板块) -> 后右侧(1Plus 矩阵)。NoMap & PolyMarket 为 Tier 3 (仅 Notify 提示不阻断)；其余指标为 Tier 1 (有错立即阻断 Checkpoint)")
             self.log_data_summary(all_summary)
 
+            table_headers = ["Section", "Group", "Sport / Item", "Pending / Value", "Status"]
+            table_rows = []
+
+            # 1. Uncompleted Score
+            for grp, scores in [("RCM", matches_data.get("rcmUncompletedScore", {})), ("LRCM", matches_data.get("lrcmUncompletedScore", {}))]:
+                for sport, val in scores.items():
+                    is_err = False
+                    try:
+                        is_err = int(str(val).replace(",", "").strip()) > 0
+                    except Exception:
+                        pass
+                    table_rows.append([
+                        CheckpointStore.make_cell("Uncompleted Score"),
+                        CheckpointStore.make_cell(grp),
+                        CheckpointStore.make_cell(sport),
+                        CheckpointStore.make_cell(str(val), bg="red" if is_err else "green"),
+                        CheckpointStore.make_cell("ERROR" if is_err else "OK", bg="red" if is_err else "green")
+                    ])
+
+            # 2. Wagers
+            for grp, w_list in [("RCM", rcm_wagers), ("LRCM", lrcm_wagers)]:
+                for w in w_list:
+                    is_err = "ERROR" in w
+                    table_rows.append([
+                        CheckpointStore.make_cell("Uncomplete Wagers"),
+                        CheckpointStore.make_cell(grp),
+                        CheckpointStore.make_cell(w.split(":")[0] if ":" in w else w),
+                        CheckpointStore.make_cell(w.split(":")[1].split("[")[0].strip() if ":" in w else w, bg="red" if is_err else "green"),
+                        CheckpointStore.make_cell("ERROR" if is_err else "OK", bg="red" if is_err else "green")
+                    ])
+
+            # 3. Poly Market & Incentives
+            for grp, p_list in [("RCM", rcm_poly), ("LRCM", lrcm_poly)]:
+                for p in p_list:
+                    table_rows.append([
+                        CheckpointStore.make_cell("Poly Market"),
+                        CheckpointStore.make_cell(grp),
+                        CheckpointStore.make_cell(p.split(":")[0] if ":" in p else p),
+                        CheckpointStore.make_cell(p.split(":")[1].strip() if ":" in p else "-", bg="white"),
+                        CheckpointStore.make_cell("NOTICE", bg="white")
+                    ])
+
+            for grp, inc_list in [("RCM", rcm_inc), ("LRCM", lrcm_inc)]:
+                for inc in inc_list:
+                    is_err = "ERROR" in inc
+                    table_rows.append([
+                        CheckpointStore.make_cell("Abnormal Incentive"),
+                        CheckpointStore.make_cell(grp),
+                        CheckpointStore.make_cell(inc.split(":")[0] if ":" in inc else inc),
+                        CheckpointStore.make_cell(inc.split(":")[1].strip() if ":" in inc else "-", bg="red" if is_err else "green"),
+                        CheckpointStore.make_cell("ERROR" if is_err else "OK", bg="red" if is_err else "green")
+                    ])
+
+            # 4. Right Matrix
+            for grp, m_list in [("RCM", matches_data.get("rightRcmMatrix", [])), ("LRCM", matches_data.get("rightLrcmMatrix", []))]:
+                for m in m_list:
+                    is_err = "ERROR" in m
+                    is_warn = "WARN" in m or "NOTICE" in m
+                    bg_col = "red" if is_err else ("white" if is_warn else "green")
+                    table_rows.append([
+                        CheckpointStore.make_cell("Rule Matrix"),
+                        CheckpointStore.make_cell(grp),
+                        CheckpointStore.make_cell(m.split(":")[0].strip() if ":" in m else m),
+                        CheckpointStore.make_cell(m.split(":")[1].split("[")[0].strip() if ":" in m else "-", bg=bg_col),
+                        CheckpointStore.make_cell("ERROR" if is_err else ("WARN" if is_warn else "OK"), bg=bg_col)
+                    ])
+
             # 4. Checkpoint 巡检结论判定
             if tier1_errors > 0:
                 self.log(f"[Error] Matches & Wagers 检测到 {tier1_errors} 项 Tier 1 致命异常，阻断 Checkpoint！")
                 if tier3_warnings > 0:
                     self.log(f"[Warn] 同时存在 {tier3_warnings} 项 Tier 3 提示项 (仅 Notify 提示)")
                 self.log_check_result(False, f"Matches & Wagers 存在 {tier1_errors} 项 Tier 1 积压，阻断 Checkpoint。")
+                CheckpointStore.save(
+                    page_key="niw_03",
+                    title="Matches Wagers",
+                    status=False,
+                    headers=table_headers,
+                    rows=table_rows,
+                    summary=f"Tier 1 异常: {tier1_errors} 项, Tier 3 提示: {tier3_warnings} 项"
+                )
                 return False
             else:
                 if tier3_warnings > 0:
@@ -334,8 +408,24 @@ class MatchesWagersChecker(BaseChecker):
 
             # 5. Checkpoint 打勾提交
             self.click_checkpoint()
+            CheckpointStore.save(
+                page_key="niw_03",
+                title="Matches Wagers",
+                status=True,
+                headers=table_headers,
+                rows=table_rows,
+                summary=f"全部 Tier 1 阻断项 0 积压正常" + (f" (含 {tier3_warnings} 项 Tier 3 提示)" if tier3_warnings > 0 else "")
+            )
             return True
 
         except Exception as e:
             self.log_check_result(False, f"Matches & Wagers 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="niw_03",
+                title="Matches Wagers",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False

@@ -20,8 +20,8 @@
 ================================================================================
 """
 
-import time
 from core.base_checker import BaseChecker
+from core.checkpoint_store import CheckpointStore
 
 
 class NIWRobotMonitorChecker(BaseChecker):
@@ -58,15 +58,16 @@ class NIWRobotMonitorChecker(BaseChecker):
                         var timestamp = tds.length >= 4 ? tds[3].innerText.trim() :
                                        (tds.length >= 3 ? tds[2].innerText.trim() : tds[1].innerText.trim());
 
-                        // 跳过表头行
-                        if (!robotId || robotId === "Robot ID" || robotId === "Robot" || robotId === "") continue;
-                        if (timestamp.indexOf("TimeStamp") !== -1 || details.indexOf("Details") !== -1) continue;
+                        var tsCell = tds.length >= 4 ? tds[3] : (tds.length >= 3 ? tds[2] : tds[1]);
+                        var cellBg = window.getComputedStyle(tsCell).backgroundColor;
+                        var isRed = (cellBg.indexOf("255") !== -1 && cellBg.indexOf("0, 0") !== -1);
 
                         targetArray.push({
                             robotId: robotId,
                             details: details,
                             interval: interval,
-                            timestamp: timestamp
+                            timestamp: timestamp,
+                            isRed: isRed
                         });
                     }
                 }
@@ -92,8 +93,11 @@ class NIWRobotMonitorChecker(BaseChecker):
                                     var det = tds.length >= 3 ? tds[1].innerText.trim() : "-";
                                     var intv = tds.length >= 4 ? tds[2].innerText.trim() : "-";
                                     var ts = tds.length >= 4 ? tds[3].innerText.trim() : tds[1].innerText.trim();
+                                    var tsCell2 = tds.length >= 4 ? tds[3] : tds[1];
+                                    var cBg = window.getComputedStyle(tsCell2).backgroundColor;
+                                    var isR = (cBg.indexOf("255") !== -1 && cBg.indexOf("0, 0") !== -1);
                                     if (rId && rId !== "Robot ID") {
-                                        target.push({ robotId: rId, details: det, interval: intv, timestamp: ts });
+                                        target.push({ robotId: rId, details: det, interval: intv, timestamp: ts, isRed: isR });
                                     }
                                 }
                             }
@@ -125,7 +129,7 @@ class NIWRobotMonitorChecker(BaseChecker):
             # [步骤 3] 打印 RCM 与 LRCM 机器人列表摘要（仅打印前 10 条）
             PREVIEW_LIMIT = 10
             summary_lines = ["【NIW Robot Monitor 全量巡检数据明细】:"]
-
+            
             # RCM 摘要
             summary_lines.append(f"--- [RCM Robot 列表 (共 {rcm_count} 个，显示前 {min(PREVIEW_LIMIT, rcm_count)} 条)] ---")
             for robot in rcm_robots[:PREVIEW_LIMIT]:
@@ -147,28 +151,78 @@ class NIWRobotMonitorChecker(BaseChecker):
 
             self.log_data_summary(summary_lines)
 
-            # [步骤 4] scan_red_cells() 全页红底/红字深度扫描
+            # 构筑 1:1 还原企业网页的两张原生独立子表 (RCM Details 与 LRCM Details)
+            subtables = [
+                {
+                    "title": "RCM Details",
+                    "header_bg": "#5B9BD5",
+                    "headers": ["Robot ID", "RCM Details", "Robot Interval", "TimeStamp"],
+                    "rows": [
+                        [
+                            CheckpointStore.make_cell(r["robotId"]),
+                            CheckpointStore.make_cell(r["details"]),
+                            CheckpointStore.make_cell(r["interval"]),
+                            CheckpointStore.make_cell(r["timestamp"], bg="red" if r.get("isRed") else "white")
+                        ]
+                        for r in rcm_robots
+                    ]
+                },
+                {
+                    "title": "LRCM Details",
+                    "header_bg": "#5B9BD5",
+                    "headers": ["Robot ID", "LRCM Details", "Robot Interval", "TimeStamp"],
+                    "rows": [
+                        [
+                            CheckpointStore.make_cell(r["robotId"]),
+                            CheckpointStore.make_cell(r["details"]),
+                            CheckpointStore.make_cell(r["interval"]),
+                            CheckpointStore.make_cell(r["timestamp"], bg="red" if r.get("isRed") else "white")
+                        ]
+                        for r in lrcm_robots
+                    ]
+                }
+            ]
+
+            # [步骤 4] scan_red_cells() 全页红底/红字深度扫描 (Check Logic 原生不变)
             red_items = self.scan_red_cells()
 
             if red_items:
                 self.log(f"[Error] NIW Robot Monitor 检测到 {len(red_items)} 个红色异常节点，触发 Tier 1 致命阻断！")
                 for item in red_items:
                     self.log(f"   [RED NODE] {item}")
-                self.log_check_result(
-                    False,
-                    f"NIW Robot Monitor 存在 {len(red_items)} 个红色异常节点，Tier 1 强阻断 Checkpoint！"
+                msg = f"NIW Robot Monitor 存在 {len(red_items)} 个红色异常节点，Tier 1 强阻断 Checkpoint！"
+                self.log_check_result(False, msg)
+                CheckpointStore.save(
+                    page_key="copier_08",
+                    title="NIW Robot Monitor",
+                    status=False,
+                    tables=subtables,
+                    summary=msg
                 )
                 return False
             else:
-                self.log_check_result(
-                    True,
-                    f"NIW Robot Monitor 全部 {total_count} 个 Robot 无红色异常（RCM: {rcm_count}, LRCM: {lrcm_count}），巡检通过！"
-                )
+                msg = f"NIW Robot Monitor 全部 {total_count} 个 Robot 无红色异常（RCM: {rcm_count}, LRCM: {lrcm_count}），巡检通过！"
+                self.log_check_result(True, msg)
 
+            CheckpointStore.save(
+                page_key="copier_08",
+                title="NIW Robot Monitor",
+                status=True,
+                tables=subtables,
+                summary=msg
+            )
             # [步骤 5] 巡检通过，点击 Checkpoint
             self.click_checkpoint()
             return True
 
         except Exception as e:
             self.log_check_result(False, f"NIW Robot Monitor 检查出现异常: {e}")
+            CheckpointStore.save(
+                page_key="copier_08",
+                title="NIW Robot Monitor",
+                status=False,
+                headers=["Error"],
+                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
+                summary="Exception during check"
+            )
             return False
