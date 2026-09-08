@@ -19,32 +19,50 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class WsumSportChecker(BaseChecker):
+    """
+    Wsum Sport 体育注单总计核查检查器类
+    负责监控 Wsum 统计与注单数的一致性，核验所有节点的 Remark 是否为 Correct。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Wsum Sport 页面 (apy_b0i14text)
+        2. 执行前端 JavaScript 提取所有公司的 Wsum、Betslips 与 Remark 字段
+        3. 严格核验 Remark 是否为 Correct (任何非 Correct 均属 Tier 1 致命异常阻断 Checkpoint)
+        4. 打印全量明细日志并将数据存储至 CheckpointStore
+        5. 巡检通过后点击关卡 Checkpoint 按钮
+        """
         # [步骤 1] 打印站头，传入 Target Menu ID: apy_b0i14text (对应 NIW 区域的 Wsum Sport 选项)
         self.log_station_header("第12站 Wsum Sport", menu_id="apy_b0i14text")
         try:
-            # [步骤 2] 导航切入 Wsum Sport 页面，缓冲等待 3.5 秒让数据自动渲染
+            # [步骤 2] 导航切入 Wsum Sport 页面
             self.navigate_to_menu("Wsum Sport", menu_id="apy_b0i14text", section="NIW")
 
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=1.5, max_wait=35)
+            
             # [步骤 3] JavaScript 脚本精准抓取 Wsum Sport 表格数据
             p12_data = self.driver.execute_script("""
+                // 1. 初始化解析结果对象
                 var result = {
-                    category: "RCM",
-                    rows: [],
-                    rawRows: [],
-                    errCount: 0,
-                    errList: []
+                    category: "RCM",   // 当前业务分类名称 (如 RCM / LRCM)
+                    rows: [],          // 格式化文本行列表 (供日志展示)
+                    rawRows: [],       // 结构化对象行列表 (供 HTML 仪表盘展示)
+                    errCount: 0,       // 异常节点统计
+                    errList: []        // 异常节点详细错误描述列表
                 };
 
-                // 获取下拉框当前选择的分区 (如 RCM / LRCM)
+                // 2. 获取下拉框当前选择的分区 (如 RCM / LRCM)
                 var sel = document.getElementById("com_select") || document.querySelector("select");
                 if (sel && sel.selectedIndex >= 0) {
                     result.category = sel.options[sel.selectedIndex].text;
                 }
 
+                // 3. 遍历页面所有 table 标签定位目标监控表格
                 var tables = document.querySelectorAll("table");
                 tables.forEach(function(t) {
+                    // 过滤日历插件控件
                     if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null) return;
                     var txt = t.innerText ? t.innerText.trim() : "";
 
@@ -53,6 +71,7 @@ class WsumSportChecker(BaseChecker):
                         var rows = t.querySelectorAll("tr");
                         rows.forEach(function(r) {
                             var tds = r.querySelectorAll("td, th");
+                            // 确保列数充足 (至少 5 列: Company | Type | Total Wsum | Total Betslips | Remark)
                             if (tds.length >= 5) {
                                 var com = tds[0].innerText.trim();
                                 var type = tds[1].innerText.trim();
@@ -62,7 +81,7 @@ class WsumSportChecker(BaseChecker):
 
                                 // 过滤表头行
                                 if (com && com !== "Company") {
-                                    // 判断 Remark 是否非 Correct (不区分大小写)
+                                    // 4. 判断 Remark 是否非 Correct (不区分大小写)
                                     var isErr = remark.toLowerCase() !== "correct";
                                     var tag = " [OK/正常绿字]";
                                     if (isErr) {
@@ -71,8 +90,11 @@ class WsumSportChecker(BaseChecker):
                                         result.errList.push(com + " Remark: " + remark);
                                     }
 
+                                    // 5. 格式化日志输出字符串
                                     var line = com + " (" + type + "): Total Wsum = " + wsum + ", Total Betslips = " + betslips + ", Remark = " + remark + tag;
                                     result.rows.push(line);
+                                    
+                                    // 6. 存入结构化数据列表
                                     result.rawRows.push({
                                         company: com,
                                         type: type,
@@ -88,6 +110,7 @@ class WsumSportChecker(BaseChecker):
                     }
                 });
 
+                // 将解析结果返回给 Python 执行端
                 return result;
             """)
 
@@ -151,13 +174,5 @@ class WsumSportChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Wsum Sport 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_12",
-                title="Wsum Sport",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception occurred"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_12", "Wsum Sport", e)

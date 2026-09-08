@@ -19,33 +19,51 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class HGPercentagesChecker(BaseChecker):
+    """
+    HG Percentages 关卡检查器类
+    负责监控各公司节点的 Editor (编辑器) 与 Betting (投注) 状态，
+    严格核验两项指标是否均为 Correct。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 HG Percentages 页面 (apy_b0i15text)
+        2. 执行前端 JavaScript 提取所有公司的 Editor 与 Betting 状态
+        3. 严格核验两项指标是否均为 Correct (任何非 Correct 均属 Tier 1 致命异常阻断 Checkpoint)
+        4. 打印全量明细日志并将数据存储至 CheckpointStore
+        5. 巡检通过后点击关卡 Checkpoint 按钮
+        """
         # [步骤 1] 打印站头，传入 Target Menu ID: apy_b0i15text (对应 NIW 区域的 HG Percentages 选项)
         self.log_station_header("第13站 HG Percentages", menu_id="apy_b0i15text")
         try:
-            # [步骤 2] 导航切入 HG Percentages 页面，缓冲等待 3.5 秒让数据自动渲染
+            # [步骤 2] 导航切入 HG Percentages 页面
             self.navigate_to_menu("HG Percentages", menu_id="apy_b0i15text", section="NIW")
 
-
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=1.5, max_wait=35)
+            
             # [步骤 3] JavaScript 脚本精准抓取 HG Percentages 表格数据
             p13_data = self.driver.execute_script("""
+                // 1. 初始化前端抓取结果字典
                 var result = {
-                    category: "RCM",
-                    rows: [],
-                    rawRows: [],
-                    errCount: 0,
-                    errList: []
+                    category: "RCM",   // 当前业务分类名称 (如 RCM / LRCM)
+                    rows: [],          // 格式化文本行列表 (供日志展示)
+                    rawRows: [],       // 结构化对象行列表 (供 HTML 仪表盘展示)
+                    errCount: 0,       // 异常节点统计
+                    errList: []        // 异常节点详细错误描述列表
                 };
 
-                // 获取下拉框当前选择的分区 (如 RCM / LRCM)
+                // 2. 获取下拉框当前选择的分区 (如 RCM / LRCM)
                 var sel = document.getElementById("com_select") || document.querySelector("select");
                 if (sel && sel.selectedIndex >= 0) {
                     result.category = sel.options[sel.selectedIndex].text;
                 }
 
+                // 3. 遍历页面所有 table 标签定位目标监控表格
                 var tables = document.querySelectorAll("table");
                 tables.forEach(function(t) {
+                    // 过滤日历控件表格
                     if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null) return;
                     var txt = t.innerText ? t.innerText.trim() : "";
 
@@ -54,6 +72,7 @@ class HGPercentagesChecker(BaseChecker):
                         var rows = t.querySelectorAll("tr");
                         rows.forEach(function(r) {
                             var tds = r.querySelectorAll("td, th");
+                            // 确保列数充足 (至少 5 列: Company | Count(Editor) | Editor | Count(Betting) | Betting)
                             if (tds.length >= 5) {
                                 var com = tds[0].innerText.trim();
                                 var cEditor = tds[1].innerText.trim();
@@ -63,7 +82,7 @@ class HGPercentagesChecker(BaseChecker):
 
                                 // 过滤表头行
                                 if (com && com !== "Company" && com.indexOf("Count") === -1) {
-                                    // 只要 Editor 或 Betting 有任何一个不是 Correct 即为报错
+                                    // 4. 只要 Editor 或 Betting 有任何一个不是 Correct 即判定为异常
                                     var isErr = editor.toLowerCase() !== "correct" || betting.toLowerCase() !== "correct";
                                     var tag = " [OK/正常绿字]";
                                     if (isErr) {
@@ -72,8 +91,11 @@ class HGPercentagesChecker(BaseChecker):
                                         result.errList.push(com + " Editor: " + editor + ", Betting: " + betting);
                                     }
 
+                                    // 5. 格式化日志输出字符串
                                     var line = com + ": Count(Editor) = " + cEditor + ", Editor = " + editor + ", Count(Betting) = " + cBetting + ", Betting = " + betting + tag;
                                     result.rows.push(line);
+                                    
+                                    // 6. 存入结构化数据列表供仪表盘展示
                                     result.rawRows.push({
                                         company: com,
                                         c_editor: cEditor,
@@ -89,6 +111,7 @@ class HGPercentagesChecker(BaseChecker):
                     }
                 });
 
+                // 将解析结果返回给 Python 执行端
                 return result;
             """)
 
@@ -152,13 +175,5 @@ class HGPercentagesChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"HG Percentages 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_13",
-                title="HG Percentages",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception occurred"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_13", "HG Percentages", e)

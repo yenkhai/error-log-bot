@@ -36,14 +36,30 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class ForecastChecker(BaseChecker):
+    """
+    Forecast 预测与补丁检查器类
+    负责监控左侧 Agency Forecast 矩阵并自动执行无遗漏 Patch 补丁修复 (Tier 2 提示不阻断)；
+    同时严格核对右侧 NASA & Forecast Compare 板块的 Remark 字段 (Tier 1 阻断)。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Forecast 页面 (apy_b0i11text)
+        2. 全局注入抗原生弹窗 Hook (拦截 window.confirm / window.alert)
+        3. 捕获左侧矩阵中的红底 error 单元格，并采用动态 Index 0 算法 100% 无遗漏点击 Patch
+        4. 提取右侧 NASA 对比表格，严格核对每个节点的 Remark 是否为 Correct (Tier 1 阻断规则)
+        5. 保存巡检快照至 CheckpointStore 并点击关卡 Checkpoint 按钮
+        """
         # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i11text (对应 NIW 区域的 Forecast 按钮)
         self.log_station_header("第10站 Forecast", menu_id="apy_b0i11text")
         try:
             # [步骤 2] 导航切入 Forecast 页面
             self.navigate_to_menu("Forecast", menu_id="apy_b0i11text", section="NIW")
 
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 3] 全局注入抗弹窗 Hook (拦截浏览器的 Confirm / Alert 询问框)
             # 作用: 防止点击 Patch 按钮时弹出的 "Confirm generate report?" 阻塞程序运行
             self.driver.execute_script("""
@@ -325,13 +341,5 @@ class ForecastChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Forecast 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_10",
-                title="Forecast",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception occurred"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_10", "Forecast", e)

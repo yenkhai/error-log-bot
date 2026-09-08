@@ -24,7 +24,22 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class RPTCRSChecker(BaseChecker):
+    """
+    RPT CRS 综合报表检查器类
+    负责监控 Agency、API、Credit 各业务线的历史区间核算同步状态，
+    动态轮询等待 AJAX 渲染完毕后，核验所有状态单元格是否为 ok 或 -。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 RPT CRS 页面 (apy_b0i16text)
+        2. 启动 Smart Wait 智能动态轮询，实时检测页面所有区间单元格加载就绪情况 (最多 60 秒)
+        3. 执行核心 JavaScript 深度抓取核算数据矩阵并核对状态 (任何 error、红底或未加载均强阻断)
+        4. 全量打印各区间同步状态并生成仪表盘记录
+        5. 校验通过后点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID 与页面键
         self.log_station_header("第14站 RPT CRS", menu_id="apy_b0i16text", page_key="niw_14")
         try:
             # 1. 导航切入 RPT CRS 页面 (基础初始导航 3 秒)
@@ -37,6 +52,7 @@ class RPTCRSChecker(BaseChecker):
             is_fully_loaded = False
             last_status = {}
 
+            # 初始等待页面骨架与主框架稳定
             self.wait_for_page_loaded(seconds=2, max_wait=30)
             self.log("[WAIT] 正在动态监测 RPT CRS 所有区间 AJAX 数据加载进度 (最大等待 30 秒)...")
 
@@ -251,13 +267,5 @@ class RPTCRSChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"RPT CRS 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_14",
-                title="RPT CRS",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception occurred"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_14", "RPT CRS", e)

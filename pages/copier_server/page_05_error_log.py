@@ -29,31 +29,51 @@ from core.checkpoint_store import CheckpointStore
 
 
 class ErrorLogChecker(BaseChecker):
+    """
+    Error Log 错误日志检查器类
+    负责监控 Copier & Server 体系下所有服务器的错误日志积压情况 (Total 列)，
+    将错误记录按数量分层归类为 Tier 3 提醒 (不阻断 Checkpoint)。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Error Log 页面 (apy_b0i23text, section="Copier")
+        2. 执行前端 JavaScript 定位并解析包含 Server 与 Total 的错误日志主表
+        3. 解析每台服务器的错误记录数值 (No Error 为正常，>0 条记录归类为 Tier 3 提醒)
+        4. 全量打印所有服务器日志状态明细
+        5. 保存巡检记录至 CheckpointStore 并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i23text
         self.log_station_header("第05站 Error Log", menu_id="apy_b0i23text")
         try:
             # [步骤 1] 导航切入 Error Log 页面
             self.navigate_to_menu("Error Log", menu_id="apy_b0i23text", section="Copier")
 
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 2] 使用 JavaScript 通过关键词 'Server' 和 'Total' 精准定位并解析表格
             error_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
-                    servers: [],      // 所有服务器行数据
+                    servers: [],      // 所有服务器行数据列表
                     tier3Count: 0,    // Total > 0 的警告提醒数
-                    okCount: 0,       // No Error 正常数
-                    totalCount: 0
+                    okCount: 0,       // No Error 正常服务器数
+                    totalCount: 0     // 捕获到的服务器总数
                 };
 
+                // 2. 获取页面中所有的 table 标签
                 var tables = document.querySelectorAll("table");
 
                 for (var t = 0; t < tables.length; t++) {
                     var txt = tables[t].innerText ? tables[t].innerText.trim() : "";
 
-                    // 通过关键词 'Server' 和 'Total' 定位 Error Log 主表
+                    // 3. 通过关键词 'Server' 和 'Total' 定位 Error Log 主表
                     if (txt.indexOf("Server") !== -1 && txt.indexOf("Total") !== -1) {
                         var rows = tables[t].querySelectorAll("tr");
 
+                        // 4. 遍历表格中所有的行
                         for (var r = 0; r < rows.length; r++) {
                             var tds = rows[r].querySelectorAll("td");
                             if (tds.length < 2) continue;
@@ -65,7 +85,7 @@ class ErrorLogChecker(BaseChecker):
                             if (!serverName || serverName === "Server" || serverName === "" ) continue;
                             if (totalVal === "Total" || totalVal === "") continue;
 
-                            // 解析 Total 值: 'No Error' 或 'X Records' 或纯数字
+                            // 5. 解析 Total 值: 'No Error' 或 'X Records' 或纯数字
                             var tier   = "OK";
                             var tag    = " [OK/No Error]";
                             var count  = 0;
@@ -75,7 +95,7 @@ class ErrorLogChecker(BaseChecker):
                                 tag  = " [OK/No Error]";
                                 result.okCount++;
                             } else {
-                                // 尝试解析数字: '1500 Records' → 1500
+                                // 尝试用正则提取数字: 如 '1500 Records' -> 1500
                                 var m = totalVal.match(/(\\d+)/);
                                 if (m) {
                                     count = parseInt(m[1]);
@@ -100,6 +120,7 @@ class ErrorLogChecker(BaseChecker):
                                 }
                             }
 
+                            // 6. 存入服务器列表
                             result.servers.push({
                                 server: serverName,
                                 total: totalVal,
@@ -112,6 +133,7 @@ class ErrorLogChecker(BaseChecker):
                     }
                 }
 
+                // 7. 统计总数并返回给 Python
                 result.totalCount = result.servers.length;
                 return result;
             """)
@@ -187,13 +209,5 @@ class ErrorLogChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Error Log 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_05",
-                title="Error Log",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("copier_05", "Error Log", e)

@@ -21,24 +21,43 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class OneWalletPendingChecker(BaseChecker):
+    """
+    1 Wallet Pending 挂单积压检查器类
+    负责监控左侧 Total Pending Transaction (120s 积压属于 Tier 1 阻断) 与
+    右侧 5 个 Pending API 监控 (属于 Tier 3 提醒，仅通报不阻断)。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 1 Wallet Pending 页面 (apy_b0i17text)
+        2. 执行前端 JavaScript 深度抓取左表 (Total Pending) 与右表 (5 个 Pending API)
+        3. 核验左侧 120s 积压是否大于 0 或呈红字红底 (Tier 1 阻断规则)
+        4. 核验右侧 5 个 API 的 120s 积压 (Tier 3 提醒规则，不阻断 Checkpoint)
+        5. 全量打印左右两侧明细日志，无 Tier 1 错误时保存快照并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID 与页面键
         self.log_station_header("第15站 1 Wallet Pending", menu_id="apy_b0i17text", page_key="niw_15")
         try:
-            # 1. 导航切入 1 Wallet Pending 页面 (等待 4 秒加载)
+            # 1. 导航切入 1 Wallet Pending 页面
             self.navigate_to_menu("1 Wallet Pending", menu_id="apy_b0i17text", section="NIW")
 
+            # 智能等待页面数据渲染完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # 2. 核心 JavaScript 脚本：同时提取左右两侧全部表格数据
             parsed_data = self.driver.execute_script("""
+                // 初始化前端抓取数据字典
                 var result = {
-                    leftRows: [],
-                    leftErrCount: 0,
-                    rightRows: [],
-                    rightWarnCount: 0,
+                    leftRows: [],          // 左侧 Total Pending 文本明细
+                    leftErrCount: 0,       // 左侧 Tier 1 异常统计
+                    rightRows: [],         // 右侧 5 大 API 文本明细
+                    rightWarnCount: 0,     // 右侧 Tier 3 警告统计
                     tableHeaders: ["Company", "Type", "120s Pending", "Right APIs Status", "Result"],
-                    tableRows: []
+                    tableRows: []          // 结构化合并数据行 (供 ASCII 表格与仪表盘展示)
                 };
 
+                // 辅助函数: 判断 RGB 颜色字符串是否呈红色预警
                 function isRed(colorStr) {
                     if (!colorStr) return false;
                     var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
@@ -234,13 +253,5 @@ class OneWalletPendingChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"1 Wallet Pending 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_15",
-                title="1 Wallet Pending",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception occurred"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_15", "1 Wallet Pending", e)

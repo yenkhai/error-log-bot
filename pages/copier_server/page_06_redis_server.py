@@ -25,31 +25,51 @@ from core.checkpoint_store import CheckpointStore
 
 
 class RedisServerChecker(BaseChecker):
+    """
+    Redis Server 缓存服务器检查器类
+    负责监控所有 Redis 缓存服务器 (Server | Remark | Total) 的健康状态，
+    严格要求每台服务器的 Total 必须显示为 'No Error' 且无红色警示 (Tier 1 强阻断)。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Redis Server 页面 (apy_b0i24text, section="Copier")
+        2. 执行前端 JavaScript 提取 Server, Remark 与 Total 列数据
+        3. 严格核查 Total 是否为 'No Error'，并检测单元格背景色是否呈红色
+        4. 发现任何异常服务器即触发 Tier 1 致命报错阻断 Checkpoint
+        5. 全部合格则保存快照并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i24text
         self.log_station_header("第06站 Redis Server", menu_id="apy_b0i24text")
         try:
             # [步骤 1] 导航切入 Redis Server 页面
             self.navigate_to_menu("Redis Server", menu_id="apy_b0i24text", section="Copier")
 
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 2] 使用 JavaScript 精准解析 Redis 服务器状态表格
             redis_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
                     servers: [],      // 所有 Redis 服务器状态列表
-                    errorCount: 0,    // Total 非 'No Error' 的数量
-                    okCount: 0,       // Total == 'No Error' 的数量
-                    totalCount: 0
+                    errorCount: 0,    // Total 非 'No Error' 或红底的异常数量
+                    okCount: 0,       // Total == 'No Error' 的正常数量
+                    totalCount: 0     // 捕获到的服务器总数
                 };
 
+                // 2. 遍历页面中所有 table 标签
                 var tables = document.querySelectorAll("table");
 
                 for (var t = 0; t < tables.length; t++) {
                     var txt = tables[t].innerText ? tables[t].innerText.trim() : "";
 
-                    // 通过关键词 'Server' 和 'Total' 以及 'Remark' 定位 Redis 状态表
+                    // 3. 通过关键词 'Server'、'Total' 以及 'Remark' 定位 Redis 状态表
                     if (txt.indexOf("Server") !== -1 && txt.indexOf("Total") !== -1) {
                         var rows = tables[t].querySelectorAll("tr");
 
+                        // 4. 遍历表格所有行
                         for (var r = 0; r < rows.length; r++) {
                             // 精确要求 3 列: Server | Remark | Total (跳过非 3 列的复杂布局行)
                             var tds = rows[r].querySelectorAll("td");
@@ -63,7 +83,7 @@ class RedisServerChecker(BaseChecker):
                             if (!serverName || serverName === "Server" || serverName === "") continue;
                             if (totalVal === "Total" || remark === "Remark") continue;
 
-                            // 判断 Total 是否为 'No Error'
+                            // 5. 判断 Total 是否为 'No Error'
                             var isOk  = (totalVal === "No Error" || totalVal === "" || totalVal === "0");
                             var tier  = isOk ? "OK" : "TIER1";
                             var tag   = isOk ? " [OK/No Error]" : " [ERROR/Tier 1 致命阻断]";
@@ -74,19 +94,20 @@ class RedisServerChecker(BaseChecker):
                                 result.errorCount++;
                             }
 
-                            // 检查 Total 单元格是否有红色警示
+                            // 6. 检查 Total 单元格是否有红色背景警示
                             var style = window.getComputedStyle(tds[2]);
                             var bg = style.backgroundColor;
                             var bgM = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
                             var hasBgRed = bgM && parseInt(bgM[1]) >= 170 && parseInt(bgM[2]) <= 110 && parseInt(bgM[3]) <= 110;
                             if (hasBgRed && isOk) {
-                                // 背景红色但 Total 文本看起来正常，仍视为错误
+                                // 背景红色但 Total 文本看起来正常，仍强行判定为错误
                                 tier = "TIER1";
                                 tag  = " [ERROR/Tier 1 红色警示]";
                                 result.errorCount++;
                                 result.okCount--;
                             }
 
+                            // 7. 存入服务器对象列表
                             result.servers.push({
                                 server: serverName,
                                 remark: remark,
@@ -99,6 +120,7 @@ class RedisServerChecker(BaseChecker):
                     }
                 }
 
+                // 8. 统计总数并返回给 Python
                 result.totalCount = result.servers.length;
                 return result;
             """)
@@ -181,13 +203,5 @@ class RedisServerChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Redis Server 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_06",
-                title="Redis Server",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("copier_06", "Redis Server", e)

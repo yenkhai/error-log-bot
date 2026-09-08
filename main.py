@@ -1,28 +1,56 @@
 """
 ================================================================================
-主程序入口文件 (main.py)
+主程序启动入口模块 (main.py)
 --------------------------------------------------------------------------------
-作用: 
-1. 重定向 sys.stdout 和 sys.stderr 标准输出流为 UTF-8 编码，防止 Windows cp1252 编码崩溃。
-2. 初始化 CustomTkinter UI 应用程序窗口实例 UnifiedBotApp 并启动主事件循环 (mainloop)。
+【核心职责】: 
+1. 解决 Windows 环境下的控制台编码陷阱 (强制重定向标准输出流为 UTF-8)。
+2. 初始化 CustomTkinter UI 桌面应用程序的主窗口实例 (UnifiedBotApp)。
+3. 启动桌面 GUI 的主事件监听循环 (app.mainloop())，使窗口持续响应用户点击交互。
 ================================================================================
 """
 
+# 导入系统级基础模块 sys，用于操作 Python 运行环境与标准输入输出流
 import sys
-import io
 
-# 强制将标准输出与错误流重定向为 UTF-8 编码，解决 Windows cp1252 环境打印 Unicode Emoji 报错的隐患
-if sys.stdout and hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-if sys.stderr and hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# --------------------------------------------------------------------------------
+# 1. Windows 控制台 UTF-8 编码安全重定向
+# --------------------------------------------------------------------------------
+# 背景说明: Windows 平台的标准输出默认可能采用 GBK 或 CP1252 编码。
+# 当代码中打印包含 Emoji 表情 (如 🚀, ❌, ✅, 🛡️) 或特殊字符时，容易抛出 UnicodeEncodeError 崩溃。
+# Python 3.7+ 提供了原生的 reconfigure 方法，无需借助 io.TextIOWrapper 手动重包装。
 
+# 使用 for 循环统一处理 stdout 和 stderr，消除重复代码
+for _stream_name in ('stdout', 'stderr'):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream and hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
+# --------------------------------------------------------------------------------
+# 2. 导入桌面图形界面主应用类
+# --------------------------------------------------------------------------------
+# 从 gui 包的 app 模块中导入主窗口类 UnifiedBotApp
 from gui.app import UnifiedBotApp
 
+# --------------------------------------------------------------------------------
+# 3. 主函数定义与启动逻辑
+# --------------------------------------------------------------------------------
 def main():
-    """主函数：创建全局 CustomTkinter 窗口对象并启动应用运行"""
+    """
+    [应用启动主函数]
+    步骤:
+    1. 实例化 UnifiedBotApp 对象，在内存中构建 CustomTkinter 窗口、加载配置并绘制各个功能 Tab。
+    2. 调用 mainloop() 进入 Tkinter 事件主循环，保持窗口前台运行并响应用户的按钮点击、输入等事件。
+    """
+    # 创建主窗口应用实例
     app = UnifiedBotApp()
+    # 启动 GUI 主事件循环，程序在此阻塞运行，直到用户关闭软件窗口
     app.mainloop()
 
+# --------------------------------------------------------------------------------
+# 4. 脚本执行入口判断
+# --------------------------------------------------------------------------------
+# __name__ == "__main__" 表示当前文件是直接作为程序被执行，而不是被其他模块 import 导入
 if __name__ == "__main__":
+    # 调用主函数启动整个程序
     main()
+

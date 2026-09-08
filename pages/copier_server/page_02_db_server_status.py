@@ -27,31 +27,50 @@ from core.checkpoint_store import CheckpointStore
 
 
 class DBServerStatusChecker(BaseChecker):
+    """
+    DB Server Status 数据库服务器状态检查器类
+    负责监控所有数据库节点 (Host, Remarks, Th_connected, ratio, Partition Event) 的健康状态，
+    并通过 scan_red_cells() 进行 DOM RGB 深度色彩扫描。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 DB Server Status 页面 (apy_b0i20text, section="Copier")
+        2. 执行前端 JavaScript 解析 mainFrame 中的数据库服务器节点状态表格
+        3. 打印全量 DB 节点明细 (No, Host, Remarks, Th_connected, ratio 等)
+        4. 调用 scan_red_cells() 对全页进行真实的 RGB 红色警戒扫描 (Tier 1 强阻断规则)
+        5. 无红色异常时保存快照并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i20text
         self.log_station_header("第02站 DB Server Status", menu_id="apy_b0i20text")
         try:
             # [步骤 1] 导航切入 DB Server Status 页面 (section="Copier" 切换 Copier & Server 选项卡)
             self.navigate_to_menu("DB Server Status", menu_id="apy_b0i20text", section="Copier")
             
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 2] 使用 JavaScript 精准解析 mainFrame 内的 DB 服务器节点表格
             # 表格列顺序: No. | Host | Remarks | Th_connected | ratio | Partition Event | Function | Company | Product
             db_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
                     servers: [],      // 所有 DB 服务器节点行数据
                     totalCount: 0     // 捕获到的服务器总数
                 };
 
-                // 获取页面所有 <table> 节点
+                // 2. 获取页面所有 <table> 节点
                 var tables = document.querySelectorAll("table");
 
                 for (var t = 0; t < tables.length; t++) {
                     var txt = tables[t].innerText ? tables[t].innerText.trim() : "";
 
-                    // 通过关键列标题 "Host" 和 "ratio" 定位 DB 服务器状态主表
+                    // 3. 通过关键列标题 "Host" 和 "ratio" 定位 DB 服务器状态主表
                     if (txt.indexOf("Host") !== -1 && txt.indexOf("ratio") !== -1) {
                         var rows = tables[t].querySelectorAll("tr");
 
+                        // 4. 遍历表格所有行
                         for (var r = 0; r < rows.length; r++) {
                             var tds = rows[r].querySelectorAll("td");
 
@@ -63,13 +82,14 @@ class DBServerStatusChecker(BaseChecker):
                                 var thConn   = tds[3].innerText.trim();
                                 var ratio    = tds[4].innerText.trim();
 
-                                // 跳过表头行
+                                // 跳过表头行与无效行
                                 if (!no || no === "No." || host === "Host" || host === "") continue;
 
-                                // 提取可选列
+                                // 提取可选列 (Partition Event 与 Function)
                                 var partEvent = tds.length > 5 ? tds[5].innerText.trim() : "-";
                                 var func      = tds.length > 6 ? tds[6].innerText.trim() : "-";
 
+                                // 5. 存入服务器节点列表
                                 result.servers.push({
                                     no: no,
                                     host: host,
@@ -85,6 +105,7 @@ class DBServerStatusChecker(BaseChecker):
                     }
                 }
 
+                // 6. 统计总数并返回给 Python
                 result.totalCount = result.servers.length;
                 return result;
             """)
@@ -170,13 +191,5 @@ class DBServerStatusChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"DB Server Status 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_02",
-                title="DB Server Status",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("copier_02", "DB Server Status", e)

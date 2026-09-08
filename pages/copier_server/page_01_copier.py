@@ -27,28 +27,37 @@
 ================================================================================
 """
 
+import sys
 import time
+from pathlib import Path
+
+# 自动将项目根目录挂载到 sys.path 中，支持直接按 F5 调试本文件
+project_root = Path(__file__).resolve().parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class CopierChecker(BaseChecker):
     def check(self) -> bool:
-        # [步骤 1] 打印站头，传入 Target Menu ID: apy_b0i19text (Copier & Server 区域的 Copier 选项)
+        # 1. 打印关卡页头信息 (Menu ID: apy_b0i19text)
         self.log_station_header("第01站 Copier", menu_id="apy_b0i19text")
         try:
-            # [步骤 2] 导航切入 Copier 页面 (section="Copier" 自动切换 Copier & Server 选项卡)
+            # 2. 自动化导航切入 Copier 专属菜单页面
             self.navigate_to_menu("Copier", menu_id="apy_b0i19text", section="Copier")
 
+            # 3. 智能等待页面载入完成
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            # [步骤 3] 获取页面内所有 iframe 子窗口列表
+            
+            # 4. 获取页面内所有 iframe 子窗口节点
             iframes = self.driver.find_elements("tag name", "iframe")
-            # 过滤掉 idx=0 的 f_popup 弹窗 frame，只保留公司监控 frame (idx 1~20)
+            # 过滤掉弹窗 frame，只保留公司 Copier Monitor 监控窗口
             company_frames = [f for f in iframes if (f.get_attribute("id") or "").startswith("f_") and "popup" not in (f.get_attribute("id") or "")]
 
             self.log_data_extracted(f"成功发现 Copier 监控子窗口: 共 {len(iframes)} 个 iframe，其中 {len(company_frames)} 个公司监控窗口")
             self.log_check_method("校验规则: 逐一穿透每家公司 Copier iframe，检查 Total Unsynch (Niw_w / Niw_winc / Niw_wmulp) 必须全部为 0 (Tier 1 强阻断)")
 
-            # [步骤 4] 逐一穿透每家公司的 Copier Monitor iframe，读取 Total Unsynch 数据
             summary_lines = ["【Copier 全量巡检数据明细】:"]
             summary_lines.append(f"--- [1. Copier Monitor 子窗口板块 (共 {len(company_frames)} 家公司)] ---")
 
@@ -56,17 +65,18 @@ class CopierChecker(BaseChecker):
             err_list = []
             rows = []
 
+            # 5. 逐一穿透每家公司的 Copier Monitor iframe，读取数据
             for frame in company_frames:
                 frame_id = frame.get_attribute("id") or "Unknown"
-                # 从 iframe ID 提取公司名称: "f_D0005 - Sport" -> "D0005 - Sport"
-                comp_name = frame_id.replace("f_", "").strip()
+                comp_name = frame_id.replace("f_", "").strip()  # 提取公司名称 (如 D0005)
 
                 try:
-                    # 4.1 切入该公司的 iframe 子窗口
+                    # 5.1 切入该公司的 iframe 子窗口
                     self.driver.switch_to.frame(frame)
 
-                    # 4.2 读取 Total Unsynch 行 (固定为 Table[0] 第 4 行 tr[3])
+                    # 5.2 在 iframe 内执行 JS 读取 Total Unsynch 行 (Table[0] 第 4 行 tr[3])
                     unsynch_data = self.driver.execute_script("""
+                        // RGB 真实红底检测
                         function isRed(colorStr) {
                             if (!colorStr) return false;
                             var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
@@ -76,6 +86,7 @@ class CopierChecker(BaseChecker):
                             return false;
                         }
 
+                        // 纯数字转换
                         function cleanNum(txt) {
                             if (!txt) return 0;
                             var n = parseInt(txt.replace(/[^0-9]/g, ""));
@@ -94,14 +105,14 @@ class CopierChecker(BaseChecker):
                         var tables = document.querySelectorAll("table");
                         if (tables.length > 0) {
                             var rows = tables[0].querySelectorAll("tr");
-                            // Row 1: Robot Last Update (indices: 1=niw_w, 2=niw_winc, 3=niw_wmulp)
+                            // Row 1: Robot Last Update (索引 1=niw_w, 2=niw_winc, 3=niw_wmulp)
                             if (rows.length > 1) {
                                 var updateTds = rows[1].querySelectorAll("td");
                                 if (updateTds.length >= 2) {
                                     result.lastUpdate = updateTds[1].innerText.trim();
                                 }
                             }
-                            // Row 3: Total Unsynch (indices: 1=niw_w, 2=niw_winc, 3=niw_wmulp)
+                            // Row 3: Total Unsynch (索引 1=niw_w, 2=niw_winc, 3=niw_wmulp)
                             if (rows.length > 3) {
                                 var tds = rows[3].querySelectorAll("td");
                                 if (tds.length >= 4) {
@@ -110,7 +121,7 @@ class CopierChecker(BaseChecker):
                                     result.niw_wmulp = cleanNum(tds[3].innerText.trim());
                                     result.found = true;
 
-                                    // 检查红色警示
+                                    // 检查红底警示
                                     for (var i = 1; i <= 3; i++) {
                                         if (i < tds.length) {
                                             var bg = window.getComputedStyle(tds[i]).backgroundColor;
@@ -133,6 +144,7 @@ class CopierChecker(BaseChecker):
                     last_update = unsynch_data.get("lastUpdate", "Unknown")
                     found = unsynch_data.get("found", False)
 
+                    # 判定异常：任意单数 > 0 或 背景为红
                     is_err = (niw_w > 0 or niw_winc > 0 or niw_wmulp > 0 or has_red)
 
                     if is_err:
@@ -144,7 +156,7 @@ class CopierChecker(BaseChecker):
                         if has_red: warn_parts.append("红色警示")
                         err_list.append(f"{comp_name} ({', '.join(warn_parts)})")
 
-                        tag = f" [ERROR/Tier 1 强阻断: {', '.join(warn_parts)}]"
+                        tag = f" 🔴[ERROR/Tier 1 强阻断: {', '.join(warn_parts)}]"
                     else:
                         tag = " [OK/正常]"
                         
@@ -169,16 +181,16 @@ class CopierChecker(BaseChecker):
                     summary_lines.append(f"   * {comp_name}: [ERR] 穿透异常: {fe}")
                     rows.append([comp_name, "ERR", "ERR", "ERR", str(fe)])
                 finally:
-                    # 4.3 切回 mainFrame 准备处理下一个公司 iframe
+                    # 5.3 必须切回 mainFrame 准备处理下一个公司 iframe
                     self.switch_to_main_frame()
-                    time.sleep(0.3)  # 短暂缓冲确保 Frame 切换稳定
+                    time.sleep(0.3)
 
-            # [步骤 5] 打印全量明细摘要
+            # 6. 打印全量数据明细
             self.log_data_summary(summary_lines)
 
             headers = ["Company", "Niw_w", "Niw_winc", "Niw_wmulp", "Last Update"]
 
-            # [步骤 6] Tier 1 报错阻断判定
+            # 7. Tier 1 报错阻断判定
             if err_count > 0:
                 msg = f"Copier 巡检发现 Tier 1 致命异常: {err_count} 家公司 Total Unsynch 非零 ({', '.join(err_list)})，强阻断 Checkpoint！"
                 self.log_check_result(False, msg)
@@ -203,17 +215,8 @@ class CopierChecker(BaseChecker):
                 rows=rows,
                 summary=msg
             )
-            # [步骤 7] Copier 页面本身没有 Checkpoint 按钮，巡检通过直接返回 True 即可
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Copier 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_01",
-                title="Copier",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常
+            return self.handle_exception("copier_01", "Copier", e)

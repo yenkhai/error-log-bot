@@ -17,30 +17,43 @@
 ================================================================================
 """
 
+import sys
+from pathlib import Path
+
+# 自动将项目根目录挂载到 sys.path 中，支持直接按 F5 调试本文件
+project_root = Path(__file__).resolve().parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class ResultProcessChecker(BaseChecker):
     def check(self) -> bool:
+        # 1. 记录当前关卡页头日志 (Menu ID: apy_b0i5text)
         self.log_station_header("第4站 Result Process", menu_id="apy_b0i5text")
         try:
-            # 1. 导航切入 Result Process 菜单
+            # 2. 自动化导航切入 Result Process 专属菜单页面
             self.navigate_to_menu("Result Process", menu_id="apy_b0i5text", section="NIW")
 
+            # 3. 智能等待页面与数据加载完成
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            # 2. 精准提取 5 大监控表格数据
+            
+            # 4. 核心 JavaScript 脚本：在前端层精准提取 5 大监控表格的数据
             p4_data = self.driver.execute_script("""
+                // 初始化结果字典容器
                 var result = {
-                    eventScoreDetails: [],
-                    synEventDetails: [],
-                    resultActionDetails: [],
-                    promotionActionDetails: [],
-                    missingDetails: [],
-                    rawRows: [],
-                    errorCount: 0
+                    eventScoreDetails: [],     // 1. Event Score Process 节点明细列表
+                    synEventDetails: [],        // 2. Syn Event 节点明细列表
+                    resultActionDetails: [],    // 3. Result Action 节点明细列表
+                    promotionActionDetails: [], // 4. Promotion Action 节点明细列表
+                    missingDetails: [],         // 5. Satellite Score Missing 检查节点列表
+                    rawRows: [],                // 结构化表格数据对象数组
+                    errorCount: 0               // 全局异常总计数
                 };
 
-                // 核心 RGB 红底判定逻辑 (R >= 170 且 G <= 110 且 B <= 110)
+                // 【辅助函数 1】: 核心 RGB 真实的红底/红字判定逻辑 (R >= 170 且 G <= 110 且 B <= 110)
+                // 这样可以精准排除白色 rgb(255,255,255) 或透明背景引发的伪误报
                 function isRed(colorStr) {
                     if (!colorStr) return false;
                     var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
@@ -51,42 +64,45 @@ class ResultProcessChecker(BaseChecker):
                     return false;
                 }
 
+                // 【辅助函数 2】: 校验单元格是否属于 success/正常
                 function checkSuccessCell(tdEl) {
                     if (!tdEl) return false;
                     var txt = tdEl.innerText ? tdEl.innerText.trim().toLowerCase() : "";
                     var bg = window.getComputedStyle(tdEl).backgroundColor;
                     var fg = window.getComputedStyle(tdEl).color;
 
-                    var hasRed = isRed(bg) || isRed(fg);
+                    var hasRed = isRed(bg) || isRed(fg); // 检查背景或文字是否为红
                     var isSuccessText = (txt === "success" || txt === "");
                     
+                    // 判定条件：如果文字不是 success、或者包含 error/fail、或者出现红底，即记为异常
                     if (!isSuccessText || hasRed || txt.indexOf("error") !== -1 || txt.indexOf("fail") !== -1) {
-                        return true;
+                        return true; // 代表有问题 (isError = true)
                     }
-                    return false;
+                    return false; // 代表正常
                 }
 
                 var tables = document.querySelectorAll("table");
                 tables.forEach(function(t) {
+                    // 过滤掉日历控件表格 ui-datepicker
                     if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null) return;
                     var txt = t.innerText ? t.innerText.trim() : "";
 
-                    // 1. Event Score Process
+                    // ── 板块 1. Event Score Process ──
                     if (txt.indexOf("Event Score Process") !== -1) {
                         var rows = t.querySelectorAll("tr");
                         for (var r = 0; r < rows.length; r++) {
                             var tds = rows[r].querySelectorAll("td, th");
                             if (tds.length >= 3) {
-                                var sat = tds[0].innerText.trim();
-                                var d1 = tds[1].innerText.trim();
-                                var d2 = tds[2].innerText.trim();
+                                var sat = tds[0].innerText.trim();  // 卫星节点名
+                                var d1 = tds[1].innerText.trim();   // 日期 1 状态
+                                var d2 = tds[2].innerText.trim();   // 日期 2 状态
                                 if (sat && sat !== "Satellite" && sat.indexOf("Event Score Process") === -1 && d1.indexOf("/") === -1) {
                                     var isErr1 = checkSuccessCell(tds[1]);
                                     var isErr2 = checkSuccessCell(tds[2]);
-                                    var isErr = (isErr1 || isErr2);
+                                    var isErr = (isErr1 || isErr2); // 任一日期非 success 记为异常
 
                                     if (isErr) result.errorCount++;
-                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    var tag = isErr ? " 🔴[ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.eventScoreDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
                                     result.rawRows.push({
                                         section: "Event Score Process",
@@ -101,7 +117,7 @@ class ResultProcessChecker(BaseChecker):
                         }
                     }
 
-                    // 2. Syn Event
+                    // ── 板块 2. Syn Event ──
                     if (txt.indexOf("Syn Event") !== -1) {
                         var rows = t.querySelectorAll("tr");
                         for (var r = 0; r < rows.length; r++) {
@@ -116,7 +132,7 @@ class ResultProcessChecker(BaseChecker):
                                     var isErr = (isErr1 || isErr2);
 
                                     if (isErr) result.errorCount++;
-                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    var tag = isErr ? " 🔴[ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.synEventDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
                                     result.rawRows.push({
                                         section: "Syn Event",
@@ -131,7 +147,7 @@ class ResultProcessChecker(BaseChecker):
                         }
                     }
 
-                    // 3. Result Action
+                    // ── 板块 3. Result Action ──
                     if (txt.indexOf("Result Action") !== -1) {
                         var rows = t.querySelectorAll("tr");
                         for (var r = 0; r < rows.length; r++) {
@@ -146,7 +162,7 @@ class ResultProcessChecker(BaseChecker):
                                     var isErr = (isErr1 || isErr2);
 
                                     if (isErr) result.errorCount++;
-                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    var tag = isErr ? " 🔴[ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.resultActionDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
                                     result.rawRows.push({
                                         section: "Result Action",
@@ -161,7 +177,7 @@ class ResultProcessChecker(BaseChecker):
                         }
                     }
 
-                    // 4. Promotion Action
+                    // ── 板块 4. Promotion Action ──
                     if (txt.indexOf("Promotion Action") !== -1) {
                         var rows = t.querySelectorAll("tr");
                         for (var r = 0; r < rows.length; r++) {
@@ -176,7 +192,7 @@ class ResultProcessChecker(BaseChecker):
                                     var isErr = (isErr1 || isErr2);
 
                                     if (isErr) result.errorCount++;
-                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    var tag = isErr ? " 🔴[ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.promotionActionDetails.push(sat + " -> D1: " + d1 + ", D2: " + d2 + tag);
                                     result.rawRows.push({
                                         section: "Promotion Action",
@@ -191,7 +207,7 @@ class ResultProcessChecker(BaseChecker):
                         }
                     }
 
-                    // 5. Satellite Score Missing
+                    // ── 板块 5. Satellite Score Missing ──
                     if (txt.indexOf("Satellite Score Missing") !== -1) {
                         var rows = t.querySelectorAll("tr");
                         for (var r = 0; r < rows.length; r++) {
@@ -205,7 +221,7 @@ class ResultProcessChecker(BaseChecker):
                                     var isErr = (isErr1 || isErr2);
 
                                     if (isErr) result.errorCount++;
-                                    var tag = isErr ? " [ERROR/异常阻断]" : " [OK/正常绿底]";
+                                    var tag = isErr ? " 🔴[ERROR/异常阻断]" : " [OK/正常绿底]";
                                     result.missingDetails.push("Score Missing Check -> D1: " + d1 + ", D2: " + d2 + tag);
                                     result.rawRows.push({
                                         section: "Satellite Score Missing",
@@ -224,6 +240,7 @@ class ResultProcessChecker(BaseChecker):
                 return result;
             """)
 
+            # 5. 在 Python 侧解构 JS 返回的数据字段
             event_details = p4_data.get("eventScoreDetails", [])
             syn_details = p4_data.get("synEventDetails", [])
             result_details = p4_data.get("resultActionDetails", [])
@@ -237,7 +254,7 @@ class ResultProcessChecker(BaseChecker):
             self.log_data_extracted(f"成功抓取 Result Process 全局 5 大监控表格共 {total_items} 项节点数据 (异常发现数: {error_count})")
             self.log_check_method("校验 5 大表格所有节点单元格是否为 success 以及 RGB 正常绿底")
 
-            # 3. 无论是否有 Error，全量明细无条件透明化打印在 Log 控制台中
+            # 6. 无论是否有 Error，全量明细无条件透明化打印在 Log 控制台中
             all_summary = ["【Result Process 全量巡检数据明细】:"]
             
             if event_details:
@@ -262,6 +279,7 @@ class ResultProcessChecker(BaseChecker):
 
             self.log_data_summary(all_summary)
 
+            # 7. 构筑 CheckpointStore 持久化存储层的结构化数据
             table_headers = ["Section", "Satellite", "Date 1 (D1)", "Date 2 (D2)", "Status"]
             table_rows = [
                 [
@@ -274,8 +292,9 @@ class ResultProcessChecker(BaseChecker):
                 for r in raw_rows
             ]
 
-            # 4. 判定结论
+            # 8. Checkpoint 巡检结论判定
             if error_count > 0:
+                # 存在异常非 success 项：阻断 Checkpoint
                 self.log(f"[Error] Result Process 检测到 {error_count} 项非 success 或红底异常，阻断 Checkpoint！")
                 self.log_check_result(False, f"Result Process 存在 {error_count} 项状态异常，阻断 Checkpoint。")
                 CheckpointStore.save(
@@ -288,9 +307,10 @@ class ResultProcessChecker(BaseChecker):
                 )
                 return False
             else:
+                # 状态全部正常通过
                 self.log_check_result(True, "Result Process 5 大表格状态全部为 success 且绿底正常，巡检通过！")
 
-            # 5. 解封并点击 Checkpoint 按钮
+            # 9. 巡检通过后解封并点击 Checkpoint 按钮打勾提交
             self.click_checkpoint()
             CheckpointStore.save(
                 page_key="niw_04",
@@ -303,13 +323,5 @@ class ResultProcessChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Result Process 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_04",
-                title="Result Process",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知运行异常
+            return self.handle_exception("niw_04", "Result Process", e)

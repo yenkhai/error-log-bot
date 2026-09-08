@@ -24,21 +24,40 @@ from core.checkpoint_store import CheckpointStore
 
 
 class APServerStatusChecker(BaseChecker):
+    """
+    AP Server Status 应用服务器状态检查器类
+    负责监控所有 10.x.x.x 内网 AP 服务器的运行状态，
+    并通过 scan_red_cells() 进行 DOM RGB 真实颜色深度扫描。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 AP Server Status 页面 (apy_b0i21text, section="Copier")
+        2. 执行前端 JavaScript 正则捕获页面中所有 10.x.x.x 的 AP 服务器 IP
+        3. 检查每个 IP 所在单元格的背景与文字颜色是否呈红底/红字
+        4. 调用 scan_red_cells() 全页扫描，存在任何红色异常即触发 Tier 1 强阻断
+        5. 全部正常则保存快照并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i21text
         self.log_station_header("第03站 AP Server Status", menu_id="apy_b0i21text")
         try:
             # [步骤 1] 导航切入 AP Server Status 页面
             self.navigate_to_menu("AP Server Status", menu_id="apy_b0i21text", section="Copier")
+            
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 2] 使用 JavaScript 解析页面中所有 AP 服务器 IP 地址
             # AP 服务器 IP 格式: 10.xxx.xxx.xxx，通过正则匹配文本节点提取
             ap_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
                     ipList: [],       // 所有捕获到的 IP 地址列表
-                    totalCount: 0
+                    totalCount: 0     // 捕获到的 IP 总数
                 };
 
-                // 在所有 td、div、span、font 节点中匹配 IP 地址格式
+                // 2. 在所有 td、div、span、font 节点中匹配 IP 地址格式
                 var elements = document.querySelectorAll("td, div, span, font, p");
                 var ipPattern = /\\b(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\b/g;
                 var seen = {};
@@ -51,7 +70,7 @@ class APServerStatusChecker(BaseChecker):
                     var txt = el.innerText ? el.innerText.trim() : "";
                     if (!txt) continue;
 
-                    // 仅匹配以 10. 开头的内网 IP（排除外部域名 IP 噪音）
+                    // 3. 仅匹配以 10. 开头的内网 IP（排除外部域名 IP 噪音）
                     var matches = txt.match(ipPattern);
                     if (matches) {
                         for (var m = 0; m < matches.length; m++) {
@@ -59,7 +78,7 @@ class APServerStatusChecker(BaseChecker):
                             if (ip.indexOf("10.") === 0 && !seen[ip]) {
                                 seen[ip] = true;
 
-                                // 检查该元素是否呈红色警示
+                                // 4. 检查该元素是否呈红色警示
                                 var style = window.getComputedStyle(el);
                                 var bg = style.backgroundColor;
                                 var fg = style.color;
@@ -70,6 +89,7 @@ class APServerStatusChecker(BaseChecker):
                                 var fgM = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
                                 if (fgM && parseInt(fgM[1]) >= 170 && parseInt(fgM[2]) <= 110 && parseInt(fgM[3]) <= 110) isRedFg = true;
 
+                                // 5. 记录 IP 及其色彩状态与上下文文本
                                 result.ipList.push({
                                     ip: ip,
                                     isRed: isRedBg || isRedFg,
@@ -80,6 +100,7 @@ class APServerStatusChecker(BaseChecker):
                     }
                 }
 
+                // 6. 统计总数并返回给 Python
                 result.totalCount = result.ipList.length;
                 return result;
             """)
@@ -161,13 +182,5 @@ class APServerStatusChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"AP Server Status 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_03",
-                title="AP Server Status",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("copier_03", "AP Server Status", e)

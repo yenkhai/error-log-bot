@@ -2,17 +2,17 @@
 ================================================================================
 第7站 RPT Compare 关卡检查器 (pages/niw/page_07_rpt_compare.py)
 --------------------------------------------------------------------------------
-全量日志与判定规则 (遵循用户最新指令):
-1. 抓取与对齐用户截图圈出的全部 4 大区域:
-   - 区域 1 (左侧状态): Rpt Complete (需为 Complete 绿底) 与 Reset Log (需为 0) [Tier 1]；
-   - 区域 2 (主对比矩阵): 26 家 Satellite 卫星公司在 6 个日期及 7 大子列 (Lg, Com, Ag, Mem, Cy, Evt, Pro) 下的状态；
-   - 区域 3 (左下 Generate Punter): 检查 Robot ID 状态 [Tier 3 仅通知不阻断]；
-   - 区域 4 (右下 Generate AI Punter): 检查 AI Robot ID 状态 [Tier 3 仅通知不阻断]；
+全量日志与判定规则 (遵循用户最新业务规范):
+1. 抓取与对齐网页上的全部 4 大核心监控区域:
+   - 区域 1 (左侧状态栏): Rpt Complete (需为 Complete 绿底) 与 Reset Log (需为 0) [Tier 1 核心]；
+   - 区域 2 (主对比大矩阵): 26 家 Satellite 卫星公司在 6 个日期及 7 大子列 (Lg, Com, Ag, Mem, Cy, Evt, Pro) 下的状态；
+   - 区域 3 (左下 Generate Punter): 检查各 Robot ID 报表生成状态 [Tier 3 仅通知不阻断]；
+   - 区域 4 (右下 Generate AI Punter): 检查各 AI Robot ID 报表生成状态 [Tier 3 仅通知不阻断]；
 
-2. 黄色 Wager Cal 智能刷新与判定规则 (用户专属规则):
-   - 如果发现黄色的 'Wager Cal' 单元格，优先点击相应卫星公司进行刷新计算；
-   - 大概点击刷新 2 次，每次点击后等待并重新获取数据；
-   - 若点击 2 次后仍显示 Wager Cal，则归类为 Tier 3 提醒（Notify 提示，不阻断 Checkpoint）；
+2. 黄色 Wager Cal 智能刷新与判定规则 (系统专属自动化机制):
+   - 如果发现黄色的 'Wager Cal' 单元格，优先点击相应卫星公司名称进行刷新触发重算；
+   - 最多循环点击刷新 2 次，每次点击后等待并重新获取最新数据；
+   - 若点击 2 次后仍显示 Wager Cal，则归类为 Tier 3 提醒 (Log 提示，不阻断 Checkpoint 打勾)；
    - 若刷新后 Wager Cal 恢复为 ok 绿底，则视为完全合格。
 
 3. 判定标准:
@@ -20,31 +20,48 @@
      * 主对比矩阵中真正呈红底或显式标记为 'error' 的单元格；
      * Reset Log > 0 或 Rpt Complete 状态异常；
      * 发现此类红色错误强阻断 Checkpoint！
-   - Tier 3 通报提醒 (不阻断 Checkpoint):
+   - Tier 3 通报提醒 (不阻断 Checkpoint 打勾):
      * 刷新 2 次后依然存在的黄色 'Wager Cal'；
-     * Generate Punter / Generate AI Punter 包含 Pending/红底；
+     * Generate Punter / Generate AI Punter 包含 Pending 挂起或红底；
      * 仅做 Log 通报提醒，正常点击 Checkpoint 通关！
 ================================================================================
 """
 
+# 导入原生时间模块，用于动作之间的休眠等待
 import time
+
+# 导入基类 BaseChecker 与内存数据存储单例 CheckpointStore
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
+
 class RPTCompareChecker(BaseChecker):
+    """
+    RPT Compare 报表对比检查器类
+    负责分析主矩阵报表一致性、自动触发 Wager Cal 刷新、以及校验 Punter 生成状态。
+    """
 
     def _click_satellite_company(self, sat_code: str) -> bool:
-        """尝试在表格中定位并点击指定卫星公司 (如 p0008) 的链接触发刷新"""
+        """
+        [辅助方法: 模拟点击卫星公司链接触发刷新]
+        在页面表格中搜索卫星公司代号 (如 p0008, d0005)，定位后点击超链接以发起重新计算请求。
+        """
         return self.driver.execute_script("""
+            // 获取传入的卫星公司代码参数
             var sat = arguments[0];
+
+            // 1. 优先在所有表格超链接 <a> 中精确查找文字匹配的公司名
             var links = document.querySelectorAll("table a");
             for (var i = 0; i < links.length; i++) {
                 var txt = links[i].innerText ? links[i].innerText.trim() : "";
                 if (txt === sat) {
+                    // 模拟原生点击事件触发刷新
                     links[i].click();
                     return true;
                 }
             }
+
+            // 2. 兜底方案: 若超链接未包裹 <a>，尝试在普通 <td> 单元格中查找并点击
             var cells = document.querySelectorAll("table td");
             for (var j = 0; j < cells.length; j++) {
                 if (cells[j].innerText && cells[j].innerText.trim() === sat) {
@@ -52,60 +69,73 @@ class RPTCompareChecker(BaseChecker):
                     return true;
                 }
             }
+
+            // 未找到对应节点返回 false
             return false;
         """, sat_code)
 
     def _extract_page7_data(self) -> dict:
-        """执行前端 JavaScript，提取 RPT Compare 当前页面的全量数据"""
+        """
+        [前端 DOM 提取脚本]
+        执行 JavaScript，深度解析当前页面上全部 4 大区域的表格结构与计算样式。
+        """
         return self.driver.execute_script("""
+            // 初始化返回数据结构字典
             var result = {
-                categoryName: "RCM",
-                rptCompleteInfo: "",
-                rptCompleteHasErr: false,
-                resetLogTotal: 0,
-                matrixSatellitesCount: 0,
-                matrixTotalOk: 0,
-                matrixErrList: [],         // 仅存放真正的红色错误 / Error 单元格 (Tier 1)
-                matrixWagerCalList: [],    // 存放黄色 Wager Cal 单元格及对应卫星公司 (Tier 3)
-                punterRows: [],
-                punterErrList: [],
-                aiPunterRows: [],
-                aiPunterErrList: [],
-                mainTableHeaders: [],
-                mainTableRows: [],
-                punterList: [],
-                aiPunterList: []
+                categoryName: "RCM",       // 下拉框当前选中的分类名 (默认 RCM)
+                rptCompleteInfo: "",        // 区域1: Rpt Complete 状态文字
+                rptCompleteHasErr: false,   // 区域1: Rpt Complete 是否异常
+                resetLogTotal: 0,           // 区域1: Reset Log 累加总数 (需为 0)
+                matrixSatellitesCount: 0,   // 区域2: 主矩阵中解析到的卫星公司数量
+                matrixTotalOk: 0,           // 区域2: 状态为 'ok' 的单元格总数
+                matrixErrList: [],          // 区域2: 仅存放真正的红色错误 / Error 单元格 (Tier 1)
+                matrixWagerCalList: [],     // 区域2: 存放黄色 Wager Cal 单元格及对应卫星公司 (Tier 3)
+                punterRows: [],             // 区域3: Punter 文本行
+                punterErrList: [],          // 区域3: Punter 异常行
+                aiPunterRows: [],           // 区域4: AI Punter 文本行
+                aiPunterErrList: [],        // 区域4: AI Punter 异常行
+                mainTableHeaders: [],       // 主矩阵表头结构
+                mainTableRows: [],          // 主矩阵数据行结构 (带颜色标记)
+                punterList: [],             // 结构化 Punter 列表
+                aiPunterList: []            // 结构化 AI Punter 列表
             };
 
+            // 1. 获取当前下拉框选中的分类名称
             var sel = document.getElementById("com_select") || document.querySelector("select");
             if (sel && sel.selectedIndex >= 0) {
                 result.categoryName = sel.options[sel.selectedIndex].text;
             }
 
+            // 2. 遍历页面所有 table 标签分别解析
             var tables = document.querySelectorAll("table");
             tables.forEach(function(t) {
+                // 排除日历控件内部的小表格
                 if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null) return;
                 var txt = t.innerText ? t.innerText.trim() : "";
 
-                // 3.1 上方主表 (Red Box 1 & 2)
+                // ── 3.1 上方主表 (区域 1 与区域 2) ──
                 if (txt.indexOf("Satellite") !== -1 || txt.indexOf("Rpt Complete") !== -1 || txt.indexOf("Reset Log") !== -1) {
                     var rows = t.querySelectorAll("tr");
                     rows.forEach(function(r) {
                         var tds = r.querySelectorAll("td, th");
+                        // 过滤列数不足的主表行
                         if (tds.length >= 10) {
                             var txts = [];
                             tds.forEach(function(c) { txts.push(c.innerText.trim()); });
                             var lineTxt = txts.join(" ");
 
+                            // (1) 提取表头结构
                             if (result.mainTableHeaders.length === 0 && (lineTxt.indexOf("Satellite") !== -1 || lineTxt.indexOf("Rpt Complete") !== -1)) {
                                 result.mainTableHeaders = txts;
                             }
 
+                            // (2) 提取 Rpt Complete 状态与背景颜色
                             if (lineTxt.indexOf("Complete") !== -1 && !result.rptCompleteInfo) {
                                 for (var i = 0; i < tds.length; i++) {
                                     var cellVal = tds[i].innerText.trim();
                                     if (cellVal.indexOf("Complete") !== -1) {
                                         var bg = window.getComputedStyle(tds[i]).backgroundColor;
+                                        // 检查是否呈红底 (RGB 255, 0, 0)
                                         var isRed = (bg.indexOf("255") !== -1 && bg.indexOf("0, 0") !== -1);
                                         result.rptCompleteInfo = cellVal;
                                         if (isRed) result.rptCompleteHasErr = true;
@@ -114,11 +144,12 @@ class RPTCompareChecker(BaseChecker):
                                 }
                             }
 
+                            // (3) 提取卫星行数据 (以包含 'sport' 作为关键标记)
                             var sportIdx = txts.indexOf("sport");
                             if (sportIdx !== -1) {
                                 result.matrixSatellitesCount++;
-                                var sat = txts[sportIdx - 1];
-                                var resetLog = txts[sportIdx - 2] || "0";
+                                var sat = txts[sportIdx - 1]; // 卫星公司代号 (如 p0001)
+                                var resetLog = txts[sportIdx - 2] || "0"; // Reset Log 数量
                                 result.resetLogTotal += parseInt(resetLog) || 0;
 
                                 var rowCells = [];
@@ -130,15 +161,17 @@ class RPTCompareChecker(BaseChecker):
                                     // 判定是否为红底或 Error 文本 (只有红色的 Error 才是 Tier 1)
                                     var isRedCell = (cellBg.indexOf("255") !== -1 && cellBg.indexOf("0, 0") !== -1) || cellText === "error" || cellText.indexOf("error") !== -1;
 
-                                    // 判定是否为黄色 Wager Cal
+                                    // 判定是否为黄色 Wager Cal 警告
                                     var isYellowCell = (cellText.indexOf("wager cal") !== -1 || cellBg.indexOf("255, 255") !== -1 || cellBg.indexOf("yellow") !== -1);
 
                                     // 判定是否为绿底或 OK 正常
                                     var isGreenCell = !isRedCell && !isYellowCell && (cellBg.indexOf("0, 128") !== -1 || cellBg.indexOf("0, 204") !== -1 || cellBg.indexOf("0, 230") !== -1 || cellBg.indexOf("0, 255") !== -1 || cellText === "ok");
 
+                                    // 赋予颜色标签
                                     var bgTag = isRedCell ? "red" : (isYellowCell ? "yellow" : (isGreenCell ? "green" : "white"));
                                     rowCells.push({ text: rawCellText, bg: bgTag });
 
+                                    // 对比列 (位于 sport 列之后) 进行详细状态收集
                                     if (c > sportIdx) {
                                         if (isRedCell) {
                                             result.matrixErrList.push(sat + " (列" + c + "): " + rawCellText + " [RED ERROR]");
@@ -151,7 +184,7 @@ class RPTCompareChecker(BaseChecker):
                                         } else if (cellText === "ok") {
                                             result.matrixTotalOk++;
                                         } else if (cellText !== "") {
-                                            // 其他非空且非 OK 的未知文本
+                                            // 其他非空且非 OK 的未知文本也需记录
                                             result.matrixErrList.push(sat + " (列" + c + "): " + rawCellText);
                                         }
                                     }
@@ -162,7 +195,7 @@ class RPTCompareChecker(BaseChecker):
                     });
                 }
 
-                // 3.2 下方 Generate Punter / AI Punter (Red Box 3 & 4 - Tier 3 规则)
+                // ── 3.2 下方 Generate Punter / AI Punter (区域 3 与区域 4) ──
                 var pRows = t.querySelectorAll("tr");
                 pRows.forEach(function(r) {
                     var tds = r.querySelectorAll("td, th");
@@ -173,8 +206,10 @@ class RPTCompareChecker(BaseChecker):
 
                         var dateCell = tds[1];
                         var dateBg = window.getComputedStyle(dateCell).backgroundColor;
+                        // 判定日期单元格是否呈红底或包含 Pending 挂起状态
                         var isRedDate = (dateBg.indexOf("255") !== -1 && dateBg.indexOf("0, 0") !== -1) || fn.indexOf("Pending") !== -1;
 
+                        // 校验是否为合法机器人 ID (纯数字且日期字符串完整)
                         if (robotId && !isNaN(parseInt(robotId)) && rptDate.length >= 8) {
                             var robotNum = parseInt(robotId);
                             var statusTag = " [OK/正常绿底]";
@@ -183,6 +218,7 @@ class RPTCompareChecker(BaseChecker):
                             var line = "Robot " + robotId + ": Rpt Date = " + rptDate + (fn ? (", Function = " + fn) : "") + statusTag;
                             var pItem = { robotId: robotId, rptDate: rptDate, fn: fn, isRed: isRedDate };
 
+                            // Robot ID >= 800 属于 AI Punter，其余属于普通 Punter
                             if (robotNum >= 800) {
                                 result.aiPunterRows.push(line);
                                 result.aiPunterList.push(pItem);
@@ -201,22 +237,27 @@ class RPTCompareChecker(BaseChecker):
         """)
 
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        串联执行导航、点击搜索、初始数据抽取、Wager Cal 2次重试刷新、全量日志输出及 Tier 1/3 评判闭环。
+        """
+        # 1. 输出关卡站头日志
         self.log_station_header("第7站 RPT Compare", menu_id="apy_b0i8text")
         try:
-            # 1. 导航切入 RPT Compare 菜单
+            # 2. 导航切入 RPT Compare 菜单 (Menu ID: apy_b0i8text)
             self.navigate_to_menu("RPT Compare", menu_id="apy_b0i8text", section="NIW")
 
-            # 2. 触发 search_data() 并动态智能轮询等待 Loading 动画消失与数据计算完毕
+            # 3. 触发网页前端 search_data() 函数并智能等待加载完成
             self.driver.execute_script("""
                 if (typeof search_data === "function") search_data();
             """)
             self.wait_for_page_loaded(seconds=1.5, max_wait=35)
 
-            # 3. 初始抓取全页 4 大区域数据
+            # 4. 初始全量抓取页面数据
             p7_data = self._extract_page7_data()
 
-            # ── 用户特别指令: 黄色 Wager Cal 刷新机制 ──
-            # 如果有显示黄色的 Wager Cal，先点击相应的公司进行刷新校验，大概点击 2 次
+            # ── 5. 用户专属核心机制: 黄色 Wager Cal 智能刷新 ──
+            # 如果发现黄色的 Wager Cal，先点击相应的卫星公司名称进行刷新，最多尝试 2 次
             wager_cal_items = p7_data.get("matrixWagerCalList", [])
             wager_cal_sats = sorted(list(set(item["sat"] for item in wager_cal_items)))
 
@@ -236,12 +277,12 @@ class RPTCompareChecker(BaseChecker):
                             self.log(f"      -> 尝试点击公司 [{sat}]")
                         time.sleep(1.0)
 
-                    # 等待片刻并触发 search_data() 确保前端重绘最新结果
+                    # 每次刷新后等待网页重绘并再次调用 search_data()
                     self.wait_for_page_loaded(seconds=2.0, max_wait=25)
                     self.driver.execute_script("if (typeof search_data === 'function') search_data();")
                     self.wait_for_page_loaded(seconds=2.0, max_wait=25)
 
-                    # 重新抓取并核验最新状态
+                    # 重新抓取数据核验 Wager Cal 是否消除
                     p7_data = self._extract_page7_data()
                     wager_cal_items = p7_data.get("matrixWagerCalList", [])
                     remaining_sats = sorted(list(set(item["sat"] for item in wager_cal_items)))
@@ -258,6 +299,7 @@ class RPTCompareChecker(BaseChecker):
                 if wager_cal_sats:
                     self.log(f"\n[Tier 3 提醒] 卫星公司 {', '.join(wager_cal_sats)} 点击刷新 2 次后仍显示 Wager Cal，根据规则判定为 Tier 3 提醒 (不阻断 Checkpoint)")
 
+            # 6. 读取各区域最终汇总指标
             cat_name = p7_data.get("categoryName", "RCM")
             rpt_comp = p7_data.get("rptCompleteInfo", "Complete")
             sat_count = p7_data.get("matrixSatellitesCount", 0)
@@ -275,7 +317,7 @@ class RPTCompareChecker(BaseChecker):
             self.log_data_extracted(f"成功抓取 RPT Compare ({cat_name}) 数据矩阵 ({sat_count} 个卫星节点) | 'ok' 单元格: {total_ok} 个 | Rpt Complete: {rpt_comp} | Reset Log: {reset_sum}")
             self.log_check_method("校验规则: 只有红色的 Error / Reset Log > 0 才是 Tier 1 阻断；黄底 Wager Cal 与 Generate Punter 挂起为 Tier 3 仅通知提醒")
 
-            # 4. 无条件全量打印明细 (全量巡检数据明细)
+            # 7. 全量打印结构化巡检明细日志
             summary_lines = [
                 f"【RPT Compare 全量巡检数据明细 ({cat_name})】:",
                 f"   * [1. 状态栏 (Tier 1)]: Rpt Complete = {rpt_comp} | Reset Log = {reset_sum} [OK/正常]",
@@ -295,60 +337,7 @@ class RPTCompareChecker(BaseChecker):
 
             self.log_data_summary(summary_lines)
 
-            table_headers = ["Section", "Satellite / Robot", "Type / Date", "Function / Reset Log", "Status"]
-            table_rows = []
-
-            # 1. Overview
-            table_rows.append([
-                CheckpointStore.make_cell("Status Overview"),
-                CheckpointStore.make_cell(cat_name),
-                CheckpointStore.make_cell(rpt_comp, bg="red" if p7_data.get("rptCompleteHasErr") else "green"),
-                CheckpointStore.make_cell(f"Reset Log: {reset_sum}", bg="red" if reset_sum > 0 else "green"),
-                CheckpointStore.make_cell("ERROR" if reset_sum > 0 else "OK", bg="red" if reset_sum > 0 else "green")
-            ])
-
-            # 2. Main Matrix
-            table_rows.append([
-                CheckpointStore.make_cell("RPT Matrix"),
-                CheckpointStore.make_cell(f"{sat_count} Satellites"),
-                CheckpointStore.make_cell(f"{total_ok} OK cells"),
-                CheckpointStore.make_cell(f"{len(matrix_errs)} errors" if matrix_errs else "No Error"),
-                CheckpointStore.make_cell("ERROR" if matrix_errs else "OK", bg="red" if matrix_errs else "green")
-            ])
-
-            # 2.1 Wager Cal 独立概览行 (如果有)
-            if final_wager_sats:
-                table_rows.append([
-                    CheckpointStore.make_cell("Wager Cal"),
-                    CheckpointStore.make_cell(", ".join(final_wager_sats)),
-                    CheckpointStore.make_cell(f"{len(final_wager_items)} cells", bg="yellow"),
-                    CheckpointStore.make_cell("Refreshed 2x"),
-                    CheckpointStore.make_cell("TIER 3", bg="yellow")
-                ])
-
-            # 3. Punter rows
-            for p in punter_rows:
-                is_p_err = "Tier 3" in p or "Pending" in p
-                table_rows.append([
-                    CheckpointStore.make_cell("Generate Punter"),
-                    CheckpointStore.make_cell(p.split(":")[0].strip() if ":" in p else p),
-                    CheckpointStore.make_cell(p.split("Rpt Date = ")[1].split(",")[0].strip() if "Rpt Date = " in p else "-"),
-                    CheckpointStore.make_cell(p.split("Function = ")[1].split("[")[0].strip() if "Function = " in p else "-"),
-                    CheckpointStore.make_cell("PENDING" if is_p_err else "OK", bg="red" if is_p_err else "green")
-                ])
-
-            # 4. AI Punter rows
-            for p in ai_punter_rows:
-                is_p_err = "Tier 3" in p or "Pending" in p
-                table_rows.append([
-                    CheckpointStore.make_cell("Generate AI Punter"),
-                    CheckpointStore.make_cell(p.split(":")[0].strip() if ":" in p else p),
-                    CheckpointStore.make_cell(p.split("Rpt Date = ")[1].split(",")[0].strip() if "Rpt Date = " in p else "-"),
-                    CheckpointStore.make_cell(p.split("Function = ")[1].split("[")[0].strip() if "Function = " in p else "-"),
-                    CheckpointStore.make_cell("PENDING" if is_p_err else "OK", bg="red" if is_p_err else "green")
-                ])
-
-            # 构筑 1:1 还原企业网页原生大表与子表结构
+            # 8. 构造 1:1 仿真多子表供 CheckpointStore 存储
             subtables = []
             main_rows = p7_data.get("mainTableRows", [])
             main_headers = p7_data.get("mainTableHeaders", [])
@@ -397,10 +386,7 @@ class RPTCompareChecker(BaseChecker):
                     ]
                 })
 
-            if not subtables:
-                subtables = [{"title": "RPT Compare Overview", "header_bg": "#C8D7A6", "headers": table_headers, "rows": table_rows}]
-
-            # 5. Tier 1 报错阻断判定 (只有红色的 Error 才是 Tier 1)
+            # 9. 严格执行 Tier 1 报错阻断判定 (唯独红色 Error、Reset Log > 0、Rpt Complete 异常会阻断)
             has_tier1_err = False
             err_reasons = []
 
@@ -427,7 +413,7 @@ class RPTCompareChecker(BaseChecker):
                 )
                 return False
 
-            # 6. Tier 3 提醒判定 (Wager Cal 刷新后仍存在、Punter & AI Punter 存在 Pending 均不阻断)
+            # 10. Tier 3 提醒汇总 (不阻断通关)
             tier3_msg = []
             if final_wager_sats:
                 tier3_msg.append(f"Wager Cal 卫星公司: {', '.join(final_wager_sats)} (共 {len(final_wager_items)} 处，已尝试刷新2次)")
@@ -441,7 +427,7 @@ class RPTCompareChecker(BaseChecker):
             else:
                 self.log_check_result(True, "RPT Compare 所有区域全部合格，通过！")
 
-            # 7. 解封并点击 Checkpoint 按钮
+            # 11. 执行 Check Point 打勾并持久化数据到内存 Store
             self.click_checkpoint()
             CheckpointStore.save(
                 page_key="niw_07",
@@ -453,13 +439,5 @@ class RPTCompareChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"RPT Compare 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_07",
-                title="RPT Compare",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 异常兜底保护
+            return self.handle_exception("niw_07", "RPT Compare", e)

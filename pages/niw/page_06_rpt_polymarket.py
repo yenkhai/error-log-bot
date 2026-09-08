@@ -14,19 +14,31 @@
 ================================================================================
 """
 
+import sys
+from pathlib import Path
+
+# 自动将项目根目录挂载到 sys.path 中，支持直接按 F5 调试本文件
+project_root = Path(__file__).resolve().parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class RPTPolyMarketChecker(BaseChecker):
     def check(self) -> bool:
+        # 1. 记录当前关卡页头日志 (Menu ID: apy_b0i7text)
         self.log_station_header("第6站 RPT PolyMarket", menu_id="apy_b0i7text")
         try:
-            # 1. 导航切入 RPT PolyMarket 菜单
+            # 2. 自动化导航切入 RPT PolyMarket 专属菜单页面
             self.navigate_to_menu("RPT PolyMarket", menu_id="apy_b0i7text", section="NIW")
 
+            # 3. 智能等待页面载入完成
             self.wait_for_page_loaded(seconds=0.5, max_wait=30)
-            # 2. 精准抓取左框 Reset Log 与右框 7 天 RPT 矩阵数据
+            
+            # 4. 核心 JavaScript 脚本：精准抓取左框 Reset Log 与右框 7 天 RPT 矩阵数据
             p6_data = self.driver.execute_script("""
+                // 初始化抓取容器
                 var result = {
                     categoryName: "RCM",
                     satelliteRows: [],
@@ -36,6 +48,7 @@ class RPTPolyMarketChecker(BaseChecker):
                     resetLogTotal: 0
                 };
 
+                // 获取下拉框当前选择的分区/公司名称
                 var sel = document.getElementById("com_select") || document.querySelector("select");
                 if (sel && sel.selectedIndex >= 0) {
                     result.categoryName = sel.options[sel.selectedIndex].text;
@@ -43,6 +56,7 @@ class RPTPolyMarketChecker(BaseChecker):
 
                 var tables = document.querySelectorAll("table");
                 tables.forEach(function(t) {
+                    // 隔离防护：过滤日历控件
                     if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null || t.querySelector("table") !== null) return;
 
                     var txt = t.innerText ? t.innerText.trim() : "";
@@ -62,6 +76,7 @@ class RPTPolyMarketChecker(BaseChecker):
                             var txts = [];
                             tds.forEach(function(c) { txts.push(c.innerText.trim()); });
 
+                            // 解析包含 "sport" 的数据行
                             if (txts.indexOf("sport") !== -1) {
                                 var sportIdx = txts.indexOf("sport");
                                 type = "sport";
@@ -73,6 +88,7 @@ class RPTPolyMarketChecker(BaseChecker):
                                     var dateStatuses = [];
                                     var rowHasErr = false;
 
+                                    // 遍历 7 天日期单元格
                                     for (var c = dateStartIdx; c < tds.length; c++) {
                                         var cellText = tds[c].innerText.trim().toLowerCase();
                                         var dIdx = c - dateStartIdx;
@@ -91,8 +107,9 @@ class RPTPolyMarketChecker(BaseChecker):
                                     var rLogNum = parseInt(resetLog) || 0;
                                     result.resetLogTotal += rLogNum;
 
+                                    // 判定异常：日期非 ok 或 Reset Log > 0
                                     var isErr = (rowHasErr || rLogNum > 0);
-                                    var statusTag = isErr ? " [ERROR/Tier 1 异常阻断]" : " [OK/正常]";
+                                    var statusTag = isErr ? " 🔴[ERROR/Tier 1 异常阻断]" : " [OK/正常]";
 
                                     var line = sat + " (" + type + "): Reset Log = " + resetLog + " | 日期状态(05/08~11/08): " + dateStatuses.join(", ") + statusTag;
                                     result.satelliteRows.push(line);
@@ -113,6 +130,7 @@ class RPTPolyMarketChecker(BaseChecker):
                 return result;
             """)
 
+            # 5. 在 Python 侧解构 JS 返回的字段变量
             cat_name = p6_data.get("categoryName", "RCM")
             sat_rows = p6_data.get("satelliteRows", [])
             raw_rows = p6_data.get("rawRows", [])
@@ -123,11 +141,12 @@ class RPTPolyMarketChecker(BaseChecker):
             self.log_data_extracted(f"成功抓取 RPT PolyMarket ({cat_name}) 数据矩阵 ({len(sat_rows)} 个卫星节点) | 'ok' 单元格: {total_ok} 个 | Reset Log 总数: {reset_sum}")
             self.log_check_method("全量核对 Satellite 卫星节点 Reset Log 及 7 天 RPT 日期状态 ( Tier 1 规则: Reset Log > 0 或非 ok 状态为 Tier 1 报错阻断 )")
 
-            # 3. 无条件全量打印明细 (全量巡检数据明细)
+            # 6. 无条件全量打印明细 (全量巡检数据明细)
             summary_lines = [f"【RPT PolyMarket 矩阵数据明细 ({cat_name})】:"]
             summary_lines.extend([f"   * {row}" for row in sat_rows])
             self.log_data_summary(summary_lines)
 
+            # 构筑 CheckpointStore 保存表格结构
             table_headers = ["Satellite", "Type", "Reset Log", "7-Day Dates Status", "Status"]
             table_rows = [
                 [
@@ -140,7 +159,7 @@ class RPTPolyMarketChecker(BaseChecker):
                 for r in raw_rows
             ]
 
-            # 4. Tier 1 阻断逻辑判定
+            # 7. Tier 1 阻断逻辑判定
             if total_err > 0 or reset_sum > 0:
                 self.log_check_result(False, f"RPT PolyMarket 发现 {total_err} 项日期异常或 Reset Log={reset_sum} > 0，判定为 Tier 1 报错，阻断 Checkpoint！")
                 CheckpointStore.save(
@@ -155,7 +174,7 @@ class RPTPolyMarketChecker(BaseChecker):
             else:
                 self.log_check_result(True, "RPT PolyMarket 所有 Satellite 卫星节点 Reset Log 均为 0 且日期状态全为 ok，巡检合格！")
 
-            # 5. 巡检合格，解封并点击 Checkpoint 按钮
+            # 8. 巡检合格，解封并点击 Checkpoint 按钮打勾提交
             self.click_checkpoint()
             CheckpointStore.save(
                 page_key="niw_06",
@@ -168,13 +187,5 @@ class RPTPolyMarketChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"RPT PolyMarket 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_06",
-                title="RPT PolyMarket",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e))]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常
+            return self.handle_exception("niw_06", "RPT PolyMarket", e)

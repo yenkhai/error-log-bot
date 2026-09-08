@@ -16,6 +16,34 @@ class BaseChecker:
     ================================================================================
     """
 
+    # 常用前端 JavaScript 辅助计算库（供子类 execute_script 组合使用）
+    JS_COMMON_UTILS = """
+    function isRed(colorStr) {
+        if (!colorStr) return false;
+        var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+        if (m) {
+            var r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+            return (r >= 170 && g <= 110 && b <= 110);
+        }
+        return false;
+    }
+    function isGreen(colorStr) {
+        if (!colorStr) return false;
+        var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+        if (m) {
+            var r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+            return (g >= 140 && r <= 100 && b <= 100);
+        }
+        return false;
+    }
+    function cleanNum(txt) {
+        if (!txt) return 0;
+        var cleaned = txt.toString().replace(/,/g, '').trim();
+        var n = parseFloat(cleaned);
+        return isNaN(n) ? 0 : n;
+    }
+    """
+
     def __init__(self, driver, logger_func=None):
         # driver: Selenium WebDriver 实例对象，用于控制浏览器
         self.driver = driver
@@ -65,14 +93,70 @@ class BaseChecker:
         """打印本关卡采取的判定计算规则"""
         self.log(f"[CHECK METHOD] 校验计算规则: {method_description}")
 
+    @staticmethod
+    def format_ascii_table(headers: list, rows: list) -> str:
+        """
+        [生成漂亮的 ASCII 边框数据表格]
+        参数:
+            headers: 表头列名列表 (如 ["Company", "Status", "Value"])
+            rows:    行数据二维列表 (如 [["d0001", "OK", "0"], ...])
+        返回:
+            格式化带线条框的纯文本表格字符串。
+        样例效果:
+            ┌─────────┬────────┬───────┐
+            │ Company │ Status │ Value │
+            ├─────────┼────────┼───────┤
+            │ d0001   │ OK     │ 0     │
+            └─────────┴────────┴───────┘
+        """
+        if not headers:
+            return ""
+
+        # 1. 初始化计算每一列的最小宽度 (先取表头文本长度)
+        col_widths = [len(str(h)) for h in headers]
+        
+        # 2. 遍历所有数据行，动态扩展列宽为行内最长文本长度
+        for row in rows:
+            for i, cell in enumerate(row):
+                if i < len(col_widths):
+                    col_widths[i] = max(col_widths[i], len(str(cell)))
+
+        # 辅助函数: 生成一行带内容的文本 (两端留 1 空格填充，单元格左对齐)
+        def make_row(cells, widths, sep="│"):
+            parts = [f" {str(c).ljust(w)} " for c, w in zip(cells, widths)]
+            return sep + sep.join(parts) + sep
+
+        # 辅助函数: 生成一行横向边框分割线 (支持自定义连接角)
+        def make_line(widths, left="├", mid="┼", right="┤", fill="─"):
+            parts = [fill * (w + 2) for w in widths]
+            return left + mid.join(parts) + right
+
+        # 3. 逐行组装边框与数据
+        lines = [
+            make_line(col_widths, "┌", "┬", "┐"),  # 顶边框
+            make_row(headers, col_widths),           # 表头文本行
+            make_line(col_widths),                  # 表头与数据分割线
+        ]
+        
+        # 填充所有数据行
+        for row in rows:
+            # 补齐不足的列数为纯空字符串
+            padded = list(row) + [""] * (len(headers) - len(row))
+            lines.append(make_row(padded, col_widths))
+        
+        # 追加底边框
+        lines.append(make_line(col_widths, "└", "┴", "┘"))
+        
+        # 使用换行符连接为完整文本返回
+        return "\n".join(lines)
+
     def log_table_data(self, headers: list, rows: list):
         """保存并格式化打印结构化表格数据（供桌面 .txt 和 HTML 仪表盘渲染）"""
         self._current_table_headers = headers
         self._current_table_rows = rows
         
         try:
-            from core.page_logger import PageLogger
-            ascii_table = PageLogger.format_ascii_table(headers, rows)
+            ascii_table = self.format_ascii_table(headers, rows)
             self.log("[TABLE DATA] 提取表格数据明细:")
             for line in ascii_table.splitlines():
                 self.log(f"   {line}")
@@ -99,25 +183,30 @@ class BaseChecker:
     # 通用关卡执行与结果提交闭环助手
     # --------------------------------------------------------------------------------
     def prepare_station(self, title: str, menu_id: str, section: str = "NIW", wait_sec: float = 2.0):
-        """[通用准备] 打印站头并导航进入指定关卡菜单"""
+        """[通用准备] 打印站头并导航进入指定关卡菜单（navigate_to_menu 内已自适应等待就绪）"""
         self.log_station_header(title, menu_id=menu_id)
         self.navigate_to_menu(title, menu_id=menu_id, section=section, wait_seconds=wait_sec)
-        self.wait_for_page_loaded(seconds=wait_sec, max_wait=30)
 
-    def finish_success(self, page_key: str, title: str, summary_msg: str,
-                       headers: list = None, rows: list = None, tables: list = None,
-                       click_cp: bool = True) -> bool:
-        """[通用通关] 打印成功日志、保存 CheckpointStore 并点击 Check Point 按钮"""
-        self.log_check_result(True, summary_msg)
+    def _save_checkpoint_result(self, page_key: str, title: str, status: bool, summary_msg: str,
+                                headers: list = None, rows: list = None, tables: list = None) -> bool:
+        """内部公共提交结果方法，消除 finish_success 与 finish_failed 的保存重复代码"""
+        self.log_check_result(status, summary_msg)
         CheckpointStore.save(
             page_key=page_key,
             title=title,
-            status=True,
+            status=status,
             headers=headers,
             rows=rows,
             tables=tables,
             summary=summary_msg
         )
+        return status
+
+    def finish_success(self, page_key: str, title: str, summary_msg: str,
+                       headers: list = None, rows: list = None, tables: list = None,
+                       click_cp: bool = True) -> bool:
+        """[通用通关] 打印成功日志、保存 CheckpointStore 并点击 Check Point 按钮"""
+        self._save_checkpoint_result(page_key, title, True, summary_msg, headers, rows, tables)
         if click_cp:
             self.click_checkpoint()
         return True
@@ -125,16 +214,7 @@ class BaseChecker:
     def finish_failed(self, page_key: str, title: str, summary_msg: str,
                       headers: list = None, rows: list = None, tables: list = None) -> bool:
         """[通用失败] 打印失败日志并保存 CheckpointStore（不点击 Check Point）"""
-        self.log_check_result(False, summary_msg)
-        CheckpointStore.save(
-            page_key=page_key,
-            title=title,
-            status=False,
-            headers=headers,
-            rows=rows,
-            tables=tables,
-            summary=summary_msg
-        )
+        self._save_checkpoint_result(page_key, title, False, summary_msg, headers, rows, tables)
         return False
 
     def handle_exception(self, page_key: str, title: str, e: Exception) -> bool:
@@ -146,7 +226,7 @@ class BaseChecker:
             status=False,
             headers=["Error"],
             rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-            summary="Exception during check"
+            summary=f"Exception: {e}"
         )
         return False
 
@@ -431,18 +511,25 @@ class BaseChecker:
         self.log("[SCAN] 正在通过 DOM RGB 计算样式深度扫描全页红字、红背景及异常节点...")
         
         red_items = self.driver.execute_script("""
-            var elements = document.querySelectorAll("td, div, span, font, a, td font, td div, td span");
+            var elements = document.querySelectorAll("td, div, span, font, a");
             var results = [];
+            function isRedRGB(colorStr) {
+                if (!colorStr) return false;
+                var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
+                if (m) {
+                    var r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
+                    return (r >= 170 && g <= 110 && b <= 110);
+                }
+                return false;
+            }
+
             for (var i = 0; i < elements.length; i++) {
                 var el = elements[i];
                 if (el.offsetWidth === 0 && el.offsetHeight === 0) continue; // 忽略不可见的节点
                 var tag = el.tagName.toLowerCase();
                 if (tag === 'th') continue; // 过滤表头
 
-                // 获取浏览器计算出来的最终渲染样式
-                var style = window.getComputedStyle(el);
-                var bg = style.backgroundColor; // 背景颜色 RGB
-                var fg = style.color;           // 字体颜色 RGB
+                // 性能优化：优先检测文本，空节点直接跳过，避免昂贵的 getComputedStyle 浏览器重排
                 var txt = el.innerText ? el.innerText.trim() : "";
                 if (!txt) continue;
 
@@ -455,21 +542,10 @@ class BaseChecker:
                     continue;
                 }
 
-                // 提取背景色 RGB 并判定是否为红色系 (Red >= 170, Green <= 110, Blue <= 110)
-                var isRedBg = false;
-                var bgMatch = bg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-                if (bgMatch) {
-                    var r = parseInt(bgMatch[1]), g = parseInt(bgMatch[2]), b = parseInt(bgMatch[3]);
-                    if (r >= 170 && g <= 110 && b <= 110) isRedBg = true;
-                }
-
-                // 提取前景色 RGB 并判定是否为红色字体
-                var isRedFg = false;
-                var fgMatch = fg.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-                if (fgMatch) {
-                    var r = parseInt(fgMatch[1]), g = parseInt(fgMatch[2]), b = parseInt(fgMatch[3]);
-                    if (r >= 170 && g <= 110 && b <= 110) isRedFg = true;
-                }
+                // 获取浏览器计算出来的最终渲染样式
+                var style = window.getComputedStyle(el);
+                var isRedBg = isRedRGB(style.backgroundColor);
+                var isRedFg = isRedRGB(style.color);
 
                 // 如果命中红背景、红字体或者文本明确为 "error" / "missing"
                 if (isRedBg || isRedFg || lowerTxt === "error" || lowerTxt === "missing") {

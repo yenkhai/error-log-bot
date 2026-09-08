@@ -28,23 +28,43 @@ from core.checkpoint_store import CheckpointStore
 
 
 class InfoRobotMonitorChecker(BaseChecker):
+    """
+    Info Robot Monitor 机器人监控检查器类
+    负责监控所有 Info 机器人的运行状态 (Robot ID | Details | Interval | TimeStamp)，
+    特别检测每行 TimeStamp 单元格是否出现红底 (代表机器人长时间挂起未运行，属于 Tier 1 强阻断)。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Info Robot Monitor 页面 (apy_b0i27text, section="Copier")
+        2. 执行前端 JavaScript 解析表格并检查每个机器人的 TimeStamp 是否呈现红底
+        3. 全量打印所有机器人的状态明细与红色时间戳异常列表
+        4. 调用 scan_red_cells() 进行全页扫描，存在红色异常立即触发 Tier 1 致命阻断
+        5. 全部正常时保存巡检结果至 CheckpointStore 并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i27text
         self.log_station_header("第09站 Info Robot Monitor", menu_id="apy_b0i27text")
         try:
             # [步骤 1] 导航切入 Info Robot Monitor 页面
             self.navigate_to_menu("Info Robot Monitor", menu_id="apy_b0i27text", section="Copier")          
+            
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 2] 使用 JavaScript 精准解析 Info Robot Monitor 表格
             # 表格列: Robot ID | Details | Robot Interval | TimeStamp
             # 特别注意: 同时检测每行 TimeStamp 单元格是否呈红色背景（长时间未运行的 Robot）
             robot_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
-                    robots: [],        // 所有 Robot 状态行
+                    robots: [],        // 所有 Robot 状态行列表
                     redRobots: [],     // 含红色时间戳的 Robot 列表（长时间未运行）
-                    totalCount: 0,
-                    redCount: 0
+                    totalCount: 0,     // 机器人总数
+                    redCount: 0        // 红色时间戳异常机器人总数
                 };
 
+                // 2. 辅助函数: 判断 RGB 颜色字符串是否呈红色
                 function isRedColor(colorStr) {
                     if (!colorStr) return false;
                     var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
@@ -54,17 +74,19 @@ class InfoRobotMonitorChecker(BaseChecker):
                     return false;
                 }
 
+                // 3. 遍历页面所有 table 标签
                 var tables = document.querySelectorAll("table");
 
                 for (var t = 0; t < tables.length; t++) {
                     var txt = tables[t].innerText ? tables[t].innerText.trim() : "";
 
-                    // 通过关键词 'Robot ID' / 'Robot' 和 'TimeStamp' 定位主表
+                    // 4. 通过关键词 'Robot ID' / 'Robot' 和 'TimeStamp' 定位主表
                     if ((txt.indexOf("Robot ID") !== -1 || txt.indexOf("Robot") !== -1)
                         && txt.indexOf("TimeStamp") !== -1) {
 
                         var rows = tables[t].querySelectorAll("tr");
 
+                        // 5. 遍历表格所有行
                         for (var r = 0; r < rows.length; r++) {
                             var tds = rows[r].querySelectorAll("td");
                             if (tds.length < 2) continue;
@@ -79,7 +101,7 @@ class InfoRobotMonitorChecker(BaseChecker):
                             if (!robotId || robotId === "Robot ID" || robotId === "Robot" || robotId === "") continue;
                             if (timestamp === "TimeStamp" || details === "Details") continue;
 
-                            // 检测 TimeStamp 单元格是否有红色背景/红字
+                            // 6. 检测 TimeStamp 单元格是否有红色背景/红字
                             var tsTd = null;
                             if (tds.length >= 4) {
                                 tsTd = tds[3];
@@ -96,7 +118,7 @@ class InfoRobotMonitorChecker(BaseChecker):
                                 tsRedFg = isRedColor(tsStyle.color);
                             }
 
-                            // 检测行内任意单元格是否有红色
+                            // 7. 检测行内任意单元格是否有红色
                             var rowHasRed = tsRedBg || tsRedFg;
                             if (!rowHasRed) {
                                 for (var c = 0; c < tds.length; c++) {
@@ -110,6 +132,7 @@ class InfoRobotMonitorChecker(BaseChecker):
 
                             var tag = rowHasRed ? " [ERROR/Tier 1 红色时间戳异常-长时间未运行]" : " [OK/正常]";
 
+                            // 8. 存入机器人员工记录
                             var entry = {
                                 robotId: robotId,
                                 details: details,
@@ -128,6 +151,7 @@ class InfoRobotMonitorChecker(BaseChecker):
                     }
                 }
 
+                // 9. 统计总数并返回给 Python
                 result.totalCount = result.robots.length;
                 result.redCount   = result.redRobots.length;
                 return result;
@@ -218,13 +242,5 @@ class InfoRobotMonitorChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Info Robot Monitor 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_09",
-                title="Info Robot Monitor",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("copier_09", "Info Robot Monitor", e)

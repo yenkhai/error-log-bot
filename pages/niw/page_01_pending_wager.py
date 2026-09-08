@@ -30,12 +30,12 @@ class PendingWagerChecker(BaseChecker):
                 var allCompanyDetails = [];   // 存放所有公司的日志文本明细 (OK/ERROR)
                 var errorCompanyDetails = []; // 仅存放存在积压异常的公司明细
                 var rawRows = [];             // 存放结构化数据，供前端/报告生成表格
-                var totalWagerPending = 0;   // 全局计数：>200s WagerPending 积压单总数
-                var totalPendingMulp = 0;    // 全局计数：MulpPending (串关/多元) 积压单总数
 
                 // 循环遍历每一家公司对应的超链接
                 for (var i = 0; i < links.length; i++) {
-                    var name = links[i].innerText.trim(); // 获取公司名称（如 RCM, LRCM, 各卫星站名）
+                    var name = links[i].innerText.trim(); // 获取公司名称 (ex. nv01 - p0001)
+                    console.log("公司名称: " + (i+1).toString() + ": " + name);
+
                     var parentTr = links[i].closest("tr"); // 向上查找超链接所在的表格行 <tr>
                     if (parentTr) {
                         var tds = parentTr.querySelectorAll("td"); // 获取该行所有的单元格 <td>
@@ -49,12 +49,12 @@ class PendingWagerChecker(BaseChecker):
                             var WagerCnt = parseInt(WagerCountText) || 0; // Wager 积压整型数量
                             var mulpCnt = parseInt(mulpCountText) || 0;   // Mulp 积压整型数量
                             
-                            // 判定是否有异常：任一单数 > 0 即为异常
+                            // Boolean 判定是否有异常：任一单数 > 0 即为异常(true)
                             var isErr = (WagerCnt > 0 || mulpCnt > 0);
 
                             // 组装格式化日志明细行
                             var detailStr = name + ": total wager pending: " + WagerCnt + ", Total Mulp pending: " + mulpCnt;
-                            allCompanyDetails.push(detailStr + (isErr ? " [ERROR]" : " [OK]"));
+                            allCompanyDetails.push(detailStr + (isErr ? "status: [ERROR]" : "status: [OK]"));
                             
                             // 保存到 rawRows 结构化数组
                             rawRows.push({
@@ -66,8 +66,6 @@ class PendingWagerChecker(BaseChecker):
 
                             // 如果存在异常，进行总数累加并加入错误列表
                             if (isErr) {
-                                totalWagerPending += WagerCnt;
-                                totalPendingMulp += mulpCnt;
                                 errorCompanyDetails.push(detailStr);
                             }
                         }
@@ -79,8 +77,6 @@ class PendingWagerChecker(BaseChecker):
                     allCompanyDetails: allCompanyDetails, 
                     errorCompanyDetails: errorCompanyDetails, 
                     rawRows: rawRows,
-                    totalWagerPending: totalWagerPending, 
-                    totalPendingMulp: totalPendingMulp, 
                     linkCount: links.length 
                 };
             """)
@@ -89,12 +85,10 @@ class PendingWagerChecker(BaseChecker):
             all_company_details = wager_info.get("allCompanyDetails", [])
             error_company_details = wager_info.get("errorCompanyDetails", [])
             raw_rows = wager_info.get("rawRows", [])
-            total_wager_pending = wager_info.get("totalWagerPending", 0)
-            total_pending_mulp = wager_info.get("totalPendingMulp", 0)
             link_count = wager_info.get("linkCount", 0)
 
             # 输出数据提取的汇总提示日志
-            self.log_data_extracted(f"成功抓取到 RCM and LRCM {link_count} 家公司完整数据 (Total pending wager (>200s): {total_wager_pending} 单 wager, Total Mulp pending: {total_pending_mulp} 单 mulp)")
+            self.log_data_extracted(f"成功抓取到 RCM and LRCM {link_count} 家公司完整数据")
 
             # 5. 无论是否有 error，一律将全量抓取到的公司及单数明细完整打印在 log 中！
             self.log_data_summary([f"【Pending Wager 全量数据明细 (共 {link_count} 家公司)】:"] + [f"   * {item}" for item in all_company_details])
@@ -114,7 +108,7 @@ class PendingWagerChecker(BaseChecker):
             # 6. 判断是否存在积压单（如果有错误公司明细）
             if len(error_company_details) > 0:
                 # 记录报错日志
-                self.log(f"[Error] total wager pending >200s: {total_wager_pending} and total mulp pending: {total_pending_mulp}")
+                self.log(f"[Error] Got pending wager or mulp record!")
                 for item in error_company_details:
                     self.log(f"  - {item}")
                 self.log_check_result(False, "Pending Wager [Error]")
@@ -126,7 +120,7 @@ class PendingWagerChecker(BaseChecker):
                     status=False,
                     headers=table_headers,
                     rows=table_rows,
-                    summary=f"发现积压: Wager={total_wager_pending}, Mulp={total_pending_mulp}"
+                    summary=f"[Error] Got pending wager or mulp record!"
                 )
                 return False
             else:
@@ -147,15 +141,6 @@ class PendingWagerChecker(BaseChecker):
             return True
 
         except Exception as e:
-            # 捕获运行中的未知异常
-            self.log_check_result(False, f"Pending Wager 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_01",
-                title="Pending Wager",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获运行中的未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_01", "Pending Wager", e)
 

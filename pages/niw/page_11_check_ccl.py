@@ -23,31 +23,47 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class CheckCCLChecker(BaseChecker):
+    """
+    Check CCL 资金与信用核查检查器类
+    负责监控左侧 Check NIW Semi Cash CCL (20家) 与右侧 Check Credit CCL (11家) 的 Error 计数。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Check CCL 页面 (apy_b0i13text)
+        2. 执行前端 JavaScript 分别抓取左侧 Semi Cash CCL 与右侧 Credit CCL 数据
+        3. 数据清洗剔除非数字字符，判断 Error 是否大于 0 或呈红字红底
+        4. 打印全量明细日志，存在任意 Error 即触发 Tier 1 报错强阻断 Checkpoint
+        5. 全部正常则保存快照并点击关卡 Checkpoint 按钮
+        """
         # [步骤 1] 打印站头，传入 Target Menu ID: apy_b0i13text (对应 NIW 区域的 Check CCL 选项)
         self.log_station_header("第11站 Check CCL", menu_id="apy_b0i13text")
         try:
-            # [步骤 2] 导航切入 Check CCL 页面，缓冲等待 3.5 秒让左右两大表格完整渲染
+            # [步骤 2] 导航切入 Check CCL 页面，缓冲等待让左右两大表格完整渲染
             self.navigate_to_menu("Check CCL", menu_id="apy_b0i13text", section="NIW")
 
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 3] JavaScript 脚本抓取左右两大 CCL 板块
             p11_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
-                    leftCategory: "RCM",
-                    leftRows: [],
-                    leftErrCount: 0,
-                    rightRows: [],
-                    rightErrCount: 0
+                    leftCategory: "RCM",   // 当前分类 (如 RCM / LRCM)
+                    leftRows: [],          // 左侧表格 (Semi Cash CCL) 数据摘要行
+                    leftErrCount: 0,       // 左侧异常数量计数
+                    rightRows: [],         // 右侧表格 (Credit CCL) 数据摘要行
+                    rightErrCount: 0       // 右侧异常数量计数
                 };
 
-                // 获取下拉框当前选择的分区 (如 RCM / LRCM)
+                // 2. 获取下拉框当前选择的分区 (如 RCM / LRCM)
                 var sel = document.getElementById("com_select") || document.querySelector("select");
                 if (sel && sel.selectedIndex >= 0) {
                     result.leftCategory = sel.options[sel.selectedIndex].text;
                 }
 
-                // 判断颜色是否为红色警示
+                // 3. 辅助函数: 判断颜色是否为红色警示 (RGB 红分量突出)
                 function isRed(colorStr) {
                     if (!colorStr) return false;
                     var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
@@ -198,13 +214,5 @@ class CheckCCLChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Check CCL 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_11",
-                title="Check CCL",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception occurred"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("niw_11", "Check CCL", e)

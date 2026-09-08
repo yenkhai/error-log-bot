@@ -27,36 +27,56 @@ from core.checkpoint_store import CheckpointStore
 
 
 class CheckAPSpaceChecker(BaseChecker):
+    """
+    Check AP Space 应用服务器磁盘空间检查器类
+    负责监控所有 AP 服务器的磁盘使用率 (Use%)，
+    当磁盘空间大于 80% 时触发 Tier 3 提醒 (仅通知不阻断 Checkpoint)。
+    """
+
     def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 Check AP Space 页面 (apy_b0i22text, section="Copier")
+        2. 执行前端 JavaScript 解析磁盘空间表格 (IP | Size | Used | Avail | Use%)
+        3. 统计 Use% > 80% 的服务器节点并归类为 Tier 3 提醒 (本站不设 Tier 1 强阻断)
+        4. 全量打印所有服务器磁盘空间明细
+        5. 保存巡检记录至 CheckpointStore 并点击关卡 Checkpoint 按钮
+        """
+        # [步骤 1] 打印站名日志头，传入 Menu ID: apy_b0i22text
         self.log_station_header("第04站 Check AP Space", menu_id="apy_b0i22text")
         try:
             # [步骤 1] 导航切入 Check AP Space 页面
             self.navigate_to_menu("Check AP Space", menu_id="apy_b0i22text", section="Copier")
 
+            # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
+            
             # [步骤 2] 使用 JavaScript 精准解析磁盘空间表格
             # 表格格式: IP | Size | Used | Avail | Use%
             space_data = self.driver.execute_script("""
+                // 1. 初始化存储结果的数据结构
                 var result = {
                     servers: [],       // 所有服务器磁盘使用情况列表
                     tier3Count: 0,     // Use% > 80% 的 Tier 3 警告提醒数
                     okCount: 0,        // Use% <= 80% 的正常数
-                    totalCount: 0
+                    totalCount: 0      // 捕获到的服务器总数
                 };
 
+                // 2. 遍历页面所有 table 标签
                 var tables = document.querySelectorAll("table");
 
                 for (var t = 0; t < tables.length; t++) {
                     var txt = tables[t].innerText ? tables[t].innerText.trim() : "";
 
-                    // 通过关键词 "Use%" 和 "Size" 定位磁盘空间表格
+                    // 3. 通过关键词 "Use%" 和 "Size" 定位磁盘空间表格
                     if (txt.indexOf("Use%") !== -1 && (txt.indexOf("Size") !== -1 || txt.indexOf("Avail") !== -1)) {
                         var rows = tables[t].querySelectorAll("tr");
 
+                        // 4. 遍历表格每一行
                         for (var r = 0; r < rows.length; r++) {
                             var tds = rows[r].querySelectorAll("td");
 
-                            // 需要至少 5 列: IP | Size | Used | Avail | Use%
+                            // 需要至少 4 列以上的数据
                             if (tds.length < 4) continue;
 
                             var col0 = tds[0].innerText.trim();
@@ -68,7 +88,7 @@ class CheckAPSpaceChecker(BaseChecker):
                             // 跳过表头行
                             if (!col0 || col0 === "IP" || col0 === "Host" || col0 === "Size") continue;
 
-                            // 尝试从各列中找到 Use% 列 (含 % 字符的列)
+                            // 5. 提取 Use% 列 (含 % 字符的列)
                             var usePercStr = "";
                             var ip = col0;
                             var size = col1, used = col2, avail = col3;
@@ -80,11 +100,11 @@ class CheckAPSpaceChecker(BaseChecker):
                                 usePercStr = col3;
                             }
 
-                            // 清理 Use% 字符串 (去掉 % 符号和空格)
+                            // 6. 清理 Use% 字符串 (去掉 % 符号和空格并转换为浮点数)
                             var usePct = parseFloat(usePercStr.replace("%", "").trim());
                             if (isNaN(usePct)) continue;
 
-                            // 判断级别: Use% > 80% 为 Tier 3 提醒，其余正常
+                            // 7. 判断级别: Use% > 80% 为 Tier 3 提醒，其余正常
                             var tier = "OK";
                             var tag  = " [OK/正常]";
                             if (usePct > 80) {
@@ -95,6 +115,7 @@ class CheckAPSpaceChecker(BaseChecker):
                                 result.okCount++;
                             }
 
+                            // 8. 存入服务器节点列表
                             result.servers.push({
                                 ip: ip,
                                 size: size,
@@ -109,6 +130,7 @@ class CheckAPSpaceChecker(BaseChecker):
                     }
                 }
 
+                // 9. 统计总数并返回给 Python
                 result.totalCount = result.servers.length;
                 return result;
             """)
@@ -187,13 +209,5 @@ class CheckAPSpaceChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Check AP Space 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="copier_04",
-                title="Check AP Space",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常并自动记录 CheckpointStore
+            return self.handle_exception("copier_04", "Check AP Space", e)

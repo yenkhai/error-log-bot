@@ -19,17 +19,26 @@
 ================================================================================
 """
 
+import sys
+from pathlib import Path
+
+# 自动将项目根目录挂载到 sys.path 中，支持直接按 F5 调试本文件
+project_root = Path(__file__).resolve().parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 class CalculateBetslipsChecker(BaseChecker):
     def check(self) -> bool:
+        # 1. 记录当前关卡页头日志 (Menu ID: apy_b0i6text)
         self.log_station_header("第5站 Calculate Betslips", menu_id="apy_b0i6text")
         try:
-            # 1. 导航切入 Calculate Betslips 菜单
+            # 2. 导航切入 Calculate Betslips 专属菜单页面
             self.navigate_to_menu("Calculate Betslips", menu_id="apy_b0i6text", section="NIW")
 
-            # 2. 获取下拉框中所有的公司列表 (RCM 与 LRCM)
+            # 3. 执行 JavaScript：提取下拉框中所有商户/公司选项列表 (RCM 与 LRCM)
             companies = self.driver.execute_script("""
                 var sel = document.getElementById("company") || document.querySelector("select[name='company']");
                 if (!sel) return [];
@@ -55,13 +64,13 @@ class CalculateBetslipsChecker(BaseChecker):
             total_recalc_err_all = 0
             has_any_tier1_error = False
 
-            # 3. 自动循环遍历所有下拉公司选项逐一扫描
+            # 4. 自动循环遍历所有下拉公司选项逐一扫描
             for comp in companies:
                 comp_idx = comp['index']
                 comp_val = comp['value']
                 comp_text = comp['text']
 
-                # 3.1 切换公司并触发计算
+                # 4.1 JavaScript 控制浏览器自动切换下拉框并点击 Calculate 按钮
                 self.driver.execute_script("""
                     var sel = document.getElementById("company") || document.querySelector("select[name='company']");
                     if (sel) {
@@ -73,25 +82,26 @@ class CalculateBetslipsChecker(BaseChecker):
                     if (typeof callCalcuate === "function") callCalcuate(1);
                 """, comp_idx)
 
-                # 3.2 动态智能轮询：等待当前公司的 Loading 动画消失与数据计算渲染完毕
+                # 4.2 动态智能轮询：等待当前公司的 Loading 动画消失与数据计算渲染完毕
                 self.wait_for_page_loaded(seconds=0.5, max_wait=15)
 
-                # 3.3 提取当前公司的数据 (包含 ui-datepicker 日历表隔离防护)
+                # 4.3 提取当前公司的数据 (包含 ui-datepicker 日历表隔离防护)
                 comp_data = self.driver.execute_script(r"""
                     var targetVal = arguments[0];
                     var targetText = arguments[1];
                     var result = {
                         companyName: targetText,
                         companyVal: targetVal,
-                        problemDetails: [],
-                        uncalculateTotal: 0,
-                        recalculateErrTotal: 0,
-                        hasTier1Error: false
+                        problemDetails: [],      // 异常玩法明细
+                        uncalculateTotal: 0,     // 未计算总数
+                        recalculateErrTotal: 0,  // 重算异常总数
+                        hasTier1Error: false     // 是否触发 Tier 1 错误
                     };
 
                     var tables = document.querySelectorAll("table");
 
                     tables.forEach(function(t) {
+                        // 隔离防护：过滤日历控件与嵌套子表
                         if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null || t.querySelector("table") !== null) {
                             return;
                         }
@@ -113,6 +123,7 @@ class CalculateBetslipsChecker(BaseChecker):
                             if (tds.length >= 8) {
                                 var bettype = tds[0].innerText.trim();
 
+                                // 过滤表头与 No Data 行
                                 if (bettype && bettype !== "Bettype" && bettype.indexOf("Bettype") === -1 && bettype.indexOf("Member") === -1 && bettype.indexOf("Total") === -1 && textAll.indexOf("No Data") === -1) {
                                     var cancel = tds[tds.length - 3] ? tds[tds.length - 3].innerText.trim() : "0";
                                     var uncalc = tds[tds.length - 2] ? tds[tds.length - 2].innerText.trim() : "0";
@@ -122,6 +133,8 @@ class CalculateBetslipsChecker(BaseChecker):
 
                                     var uCnt = parseInt(uncalc) || 0;
                                     var isUncalcErr = uCnt > 0;
+                                    
+                                    // RGB 真实红底检测
                                     function isRed(colorStr) {
                                         if (!colorStr) return false;
                                         var m = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
@@ -179,7 +192,7 @@ class CalculateBetslipsChecker(BaseChecker):
                     comp_err_lines.extend([f"      -> {p}" for p in comp_data.get("problemDetails", [])])
                     problem_companies_summary.extend(comp_err_lines)
 
-            # 4. 日志合成输出
+            # 5. 全量扫描完成后的日志合成输出
             self.log_data_extracted(f"成功完成全部 {len(companies)} 家公司的全量巡检扫描！")
             self.log_check_method("全量公司遍历 + 显式视觉渲染等待 (0.8s) + Datepicker 日历表隔离 -> 校验 Uncalculate > 0 或 Recalculate != OK 为 Tier 1 报错阻断")
 
@@ -194,6 +207,7 @@ class CalculateBetslipsChecker(BaseChecker):
                 for r in all_company_rows
             ]
 
+            # 6. Checkpoint 巡检结论判定
             if has_any_tier1_error:
                 self.log_data_summary(problem_companies_summary)
                 self.log_check_result(False, f"Calculate Betslips 巡检中发现异常公司，存在 Uncalculate 未计算或 Recalculate 异常，阻断 Checkpoint！")
@@ -210,7 +224,7 @@ class CalculateBetslipsChecker(BaseChecker):
                 self.log_data_summary([f"Calculate Betslips 全部 {len(companies)} 家公司巡检完毕: 所有公司的 Uncalculate 均为 0 且 Recalculate 均为 OK 绿底！[全部正常]"])
                 self.log_check_result(True, f"Calculate Betslips 全部 {len(companies)} 家公司巡检通过！")
 
-            # 5. 解封并点击 Checkpoint 按钮
+            # 7. 解封并点击 Checkpoint 按钮提交保存
             self.click_checkpoint()
             CheckpointStore.save(
                 page_key="niw_05",
@@ -223,13 +237,5 @@ class CalculateBetslipsChecker(BaseChecker):
             return True
 
         except Exception as e:
-            self.log_check_result(False, f"Calculate Betslips 检查出现异常: {e}")
-            CheckpointStore.save(
-                page_key="niw_05",
-                title="Calculate Betslips",
-                status=False,
-                headers=["Error"],
-                rows=[[CheckpointStore.make_cell(str(e), bg="red")]],
-                summary="Exception during check"
-            )
-            return False
+            # 捕获未知异常
+            return self.handle_exception("niw_05", "Calculate Betslips", e)
