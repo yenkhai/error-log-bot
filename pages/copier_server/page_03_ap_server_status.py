@@ -44,10 +44,10 @@ class APServerStatusChecker(BaseChecker):
         try:
             # [步骤 1] 导航切入 AP Server Status 页面
             self.navigate_to_menu("AP Server Status", menu_id="apy_b0i21text", section="Copier")
-            
+
             # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            
+
             # [步骤 2] 使用 JavaScript 解析页面中所有 AP 服务器 IP 地址
             # AP 服务器 IP 格式: 10.xxx.xxx.xxx，通过正则匹配文本节点提取
             ap_data = self.driver.execute_script("""
@@ -134,7 +134,7 @@ class APServerStatusChecker(BaseChecker):
 
             # [步骤 4] scan_red_cells() 全页红底/红字深度扫描（双重确认）
             red_items = self.scan_red_cells()
-            
+
             headers = ["IP", "Status", "Context"]
             rows = []
             for item in ip_list:
@@ -144,7 +144,7 @@ class APServerStatusChecker(BaseChecker):
                     CheckpointStore.make_cell("Error" if item["isRed"] else "OK", bg),
                     item["context"]
                 ])
-            
+
             if red_items:
                 for item in red_items:
                     rows.append([CheckpointStore.make_cell(str(item), "red"), "Error", "RED NODE"])
@@ -153,10 +153,11 @@ class APServerStatusChecker(BaseChecker):
                 self.log(f"[Error] AP Server Status 检测到 {len(red_items)} 个红色异常节点，触发 Tier 1 致命阻断！")
                 for item in red_items:
                     self.log(f"   [RED NODE] {item}")
-                
+
                 msg = f"AP Server Status 存在 {len(red_items)} 个红色异常节点（含红色 IP: {red_ips}），Tier 1 强阻断 Checkpoint！"
                 self.log_check_result(False, msg)
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(headers) if h == "Status"),
                     page_key="copier_03",
                     title="AP Server Status",
                     status=False,
@@ -170,6 +171,7 @@ class APServerStatusChecker(BaseChecker):
                 self.log_check_result(True, msg)
 
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(headers) if h == "Status"),
                 page_key="copier_03",
                 title="AP Server Status",
                 status=True,
@@ -178,7 +180,8 @@ class APServerStatusChecker(BaseChecker):
                 summary=msg
             )
             # [步骤 5] 巡检通过，点击 Checkpoint
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             return True
 
         except Exception as e:

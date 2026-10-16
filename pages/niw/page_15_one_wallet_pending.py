@@ -19,6 +19,42 @@
 
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
+from core.native_tables import capture_native_tables
+
+def wallet_display_tables(tables):
+    """Keep native groups and numeric columns, omitting repeated Type and actions."""
+    result = []
+    for table in tables:
+        headers = table.get("headers", [])
+        if not any("Total Pending" in str(h) for h in headers):
+            continue
+        keep = [i for i, h in enumerate(headers)
+                if str(h).split("\n")[-1].strip().lower() not in ("type", "function")]
+        projected = {**table, "headers": [headers[i] for i in keep]}
+        for key in ("rows", "header_rows"):
+            projected[key] = [[row[i] for i in keep] for row in table.get(key, [])]
+        for key in ("header_spans", "cell_spans"):
+            projected[key] = []
+            for span in table.get(key, []):
+                columns = [i for i in keep if span["col"] <= i < span["col"] + span.get("colspan", 1)]
+                if columns:
+                    projected[key].append({**span, "col": keep.index(columns[0]), "colspan": len(columns)})
+        if any("Rollback" in str(h) for h in headers):
+            # One header row: the API name already identifies each numeric column.
+            projected["headers"] = [str(h).split("\n120s")[0] for h in projected["headers"]]
+            def wrap_api(text):
+                return " ".join(str(text).split()).replace("Total Pending ", "Total Pending\n", 1)
+            projected["headers"] = [wrap_api(h) for h in projected["headers"]]
+            if projected.get("header_rows"):
+                projected["header_rows"] = projected["header_rows"][:1]
+                projected["header_rows"] = [[{**cell, "text": wrap_api(cell.get("text", ""))}
+                                              if isinstance(cell, dict) else wrap_api(cell) for cell in row]
+                                             for row in projected["header_rows"]]
+                projected["header_spans"] = [{**span, "rowspan": 1}
+                                             for span in projected.get("header_spans", []) if span["row"] == 0]
+        result.append(projected)
+    return result
+
 
 class OneWalletPendingChecker(BaseChecker):
     """
@@ -44,7 +80,7 @@ class OneWalletPendingChecker(BaseChecker):
 
             # 智能等待页面数据渲染完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            
+
             # 2. 核心 JavaScript 脚本：同时提取左右两侧全部表格数据
             parsed_data = self.driver.execute_script("""
                 // 初始化前端抓取数据字典
@@ -192,7 +228,7 @@ class OneWalletPendingChecker(BaseChecker):
 
             # 3. 组装全量巡检日志
             all_summary = ["【1 Wallet Pending 左右两侧全量数据明细】:"]
-            
+
             all_summary.append("==================================================")
             all_summary.append("PART 1: 【左侧表格】 Total Pending Transaction (Tier 1 规则)")
             all_summary.append("==================================================")
@@ -220,6 +256,10 @@ class OneWalletPendingChecker(BaseChecker):
             if t_rows:
                 self.log_table_data(t_headers, t_rows)
 
+            display_tables = wallet_display_tables(capture_native_tables(self.driver, "wallet"))
+            if len(display_tables) != 2 or any(not table.get("rows") for table in display_tables) or not left_rows or not right_rows:
+                raise RuntimeError("1 Wallet 左右表格未完整加载")
+
             # 5. Checkpoint 巡检结论判定
             if left_err > 0:
                 self.log(f"[Error] 1 Wallet Pending 左侧检测到 {left_err} 项 120s 超时积压，属于 Tier 1 致命异常，阻断 Checkpoint！")
@@ -230,6 +270,7 @@ class OneWalletPendingChecker(BaseChecker):
                     page_key="niw_15",
                     title="1 Wallet Pending",
                     status=False,
+                    tables=display_tables,
                     headers=t_headers,
                     rows=[[CheckpointStore.make_cell(str(c)) for c in r] for r in t_rows],
                     summary=f"Tier 1 errors: {left_err}, Tier 3 warnings: {right_warn}"
@@ -241,11 +282,14 @@ class OneWalletPendingChecker(BaseChecker):
                 self.log_check_result(True, "1 Wallet Pending 左侧 120s 积压全部为 0，巡检通过！")
 
             # 6. 点击 Checkpoint 打勾提交
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
                 page_key="niw_15",
                 title="1 Wallet Pending",
                 status=True,
+                tables=display_tables,
+                has_warn=right_warn > 0,
                 headers=t_headers,
                 rows=[[CheckpointStore.make_cell(str(c)) for c in r] for r in t_rows],
                 summary=f"Tier 3 warnings: {right_warn}" if right_warn > 0 else "All Pending APIs clear"

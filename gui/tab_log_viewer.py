@@ -1,3 +1,4 @@
+from core.native_tables import forecast_right_tables
 """
 ================================================================================
 巡检日志浏览器选项卡 (gui/tab_log_viewer.py)
@@ -19,51 +20,22 @@
 ================================================================================
 """
 
-# 导入正则表达式模块，用于快速匹配企业网页链接特征 (如卫星代号 s0001、IP 地址、Generate 日期等)
-import re
-
 # 导入 Tkinter 原生 GUI 模块与 ttk 高级主题组件库
 import tkinter as tk
 import tkinter.ttk as ttk
-
-# 导入 CustomTkinter 现代 GUI 库
 import customtkinter as ctk
+import re
 
-# 导入内存巡检结果存储中心，用于读取 24 关的最新表格数据与摘要
 from core.checkpoint_store import CheckpointStore
+
+# make_cell 和 _auto_color 使用的错误关键字正则 (单词边界匹配，杜绝 credit, ordered 等被误伤)
+_RED_PATTERN = re.compile(r'\b(error|fail|failed|red|block|blocked|fatal|die)\b', re.IGNORECASE)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  24 个关卡的系统标准代号与用户友好显示名称映射表
 # ─────────────────────────────────────────────────────────────────────────────
-STATION_LIST = [
-    # ── NIW 核心业务区 15 关 ──
-    ("niw_01",    "NIW Station 01 - Pending Wager"),
-    ("niw_02",    "NIW Station 02 - CCL Recover"),
-    ("niw_03",    "NIW Station 03 - Matches Wagers"),
-    ("niw_04",    "NIW Station 04 - Result Process"),
-    ("niw_05",    "NIW Station 05 - Calculate Betslips"),
-    ("niw_06",    "NIW Station 06 - RPT PolyMarket"),
-    ("niw_07",    "NIW Station 07 - RPT Compare"),
-    ("niw_08",    "NIW Station 08 - RPT AI"),
-    ("niw_09",    "NIW Station 09 - RPT Compare UTC"),
-    ("niw_10",    "NIW Station 10 - Forecast"),
-    ("niw_11",    "NIW Station 11 - Check CCL"),
-    ("niw_12",    "NIW Station 12 - Wsum Sport"),
-    ("niw_13",    "NIW Station 13 - HG Percentages"),
-    ("niw_14",    "NIW Station 14 - RPT CRS"),
-    ("niw_15",    "NIW Station 15 - 1 Wallet Pending"),
-    # ── Copier & 服务器基础设施区 9 关 ──
-    ("copier_01", "Copier Station 01 - Copier"),
-    ("copier_02", "Copier Station 02 - DB Server Status"),
-    ("copier_03", "Copier Station 03 - AP Server Status"),
-    ("copier_04", "Copier Station 04 - Check AP Space"),
-    ("copier_05", "Copier Station 05 - Error Log"),
-    ("copier_06", "Copier Station 06 - Redis Server"),
-    ("copier_07", "Copier Station 07 - Robot Monitor"),
-    ("copier_08", "Copier Station 08 - NIW Robot Monitor"),
-    ("copier_09", "Copier Station 09 - Info Robot Monitor"),
-]
+from core.stations import STATION_LIST
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  企业系统网页真实色彩常量定义 (1:1 还原内部页面像素级视觉风格)
@@ -76,8 +48,19 @@ COLOR_HEADER_BLUE    = "#5B9BD5"   # 原生工控科技蓝表头底色 (Robot Mo
 COLOR_HEADER_FG      = "#000000"   # 原生深黑表头文字 (加粗显示)
 COLOR_WHITE_BG       = "#FFFFFF"   # 纯白底色 (普通普通数据单元格)
 COLOR_BLACK_FG       = "#000000"   # 原生深黑色数据文字
-COLOR_LINK_FG        = "#0000EE"   # 原生蓝色超链接文字 (如 s0001, d0005, IP 地址等)
-COLOR_BORDER         = "#000000"   # 原生极细纯黑边框线条
+
+
+def _tk_color(value, default="white"):
+    if not value:
+        return default
+    if str(value).startswith(("rgb(", "rgba(")):
+        parts = re.findall(r"[\d.]+", value)
+        if len(parts) >= 3:
+            if len(parts) >= 4 and float(parts[3]) == 0:
+                return default
+            return "#" + "".join(f"{max(0, min(255, int(float(v)))):02x}" for v in parts[:3])
+        return default
+    return value
 
 
 class LogViewerTab(ctk.CTkFrame):
@@ -199,6 +182,7 @@ class LogViewerTab(ctk.CTkFrame):
     # 行选中时的动态配色映射表 (tag -> (选中背景色, 选中文字色))
     _SELECT_COLORS = {
         "status_error":   ("#4a151b", "#ff6b6b"),   # 酒红底 + 亮红字
+        "status_warn":    ("#4d3d14", "#f1fa8c"),   # 暖棕黄底 + 明黄字 (警告状态高亮)
         "status_pass":    ("#133926", "#50fa7b"),   # 墨绿底 + 翠绿字
         "status_not_run": ("#203247", "#c5cdd9"),   # 蓝灰底 + 浅银灰字
     }
@@ -206,9 +190,10 @@ class LogViewerTab(ctk.CTkFrame):
     def _on_tree_select(self, event=None):
         """
         [行选中事件响应]
-        依据当前被选中的行状态（Passed、Error、Not Run），
+        依据当前被选中的行状态（Passed、Warning、Error、Not Run），
         动态更新 Treeview 的选中高亮配色，彻底杜绝选中有异常 (Error) 的行时显示为绿色。
         - 异常关卡选中: 酒红底色 (#4a151b) + 亮红文字 (#ff6b6b)，极其醒目清晰
+        - 警告关卡选中: 暖棕黄底 (#4d3d14) + 明黄文字 (#f1fa8c)
         - 通过关卡选中: 墨绿底色 (#133926) + 亮绿文字 (#50fa7b)
         - 未跑关卡选中: 蓝灰底色 (#203247) + 浅灰文字 (#c5cdd9)
         """
@@ -231,7 +216,7 @@ class LogViewerTab(ctk.CTkFrame):
         """
         [刷新关卡状态列表]
         从内存单例 CheckpointStore.get_all_summary() 读取所有关卡的执行结果快照，
-        清空现有 Treeview 并按 24 关顺序逐一插入，赋予通过 (绿)、异常 (红)、未跑 (灰) 标签色彩。
+        清空现有 Treeview 并按 24 关顺序逐一插入，赋予通过 (绿)、警告 (黄)、异常 (红)、未跑 (灰) 标签色彩。
         """
         # 0. 记录当前选中的行索引，以便刷新后无缝恢复高亮
         selected_idx = None
@@ -245,7 +230,7 @@ class LogViewerTab(ctk.CTkFrame):
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # 2. 从内存获取全局摘要字典 {page_key: {"status": bool, "timestamp": str, "summary": str}}
+        # 2. 从内存获取全局摘要字典 {page_key: {"status": bool, "has_warn": bool, "timestamp": str, "summary": str}}
         all_summary = CheckpointStore.get_all_summary()
 
         # 3. 按 STATION_LIST 预设次序遍历渲染 24 个关卡
@@ -254,20 +239,31 @@ class LogViewerTab(ctk.CTkFrame):
             tag = f"tag_{page_key}"
             if info:
                 # 关卡已执行过巡检
-                status_text = "✅ Passed" if info["status"] else "❌ Error"
+                is_pass = info["status"]
+                has_warn = info.get("has_warn", False)
                 time_text = info["timestamp"]
-                status_tag = "status_pass" if info["status"] else "status_error"
+
+                # 三态显示判定: Error(红) > Warning(黄) > Passed(绿)
+                if not is_pass:
+                    status_text = "❌ Error"
+                    status_tag = "status_error"
+                    color_fg = "#ff6b6b"   # 亮红
+                elif has_warn:
+                    status_text = "⚠️ Warning"
+                    status_tag = "status_warn"
+                    color_fg = "#f1fa8c"   # 明黄 (有warn没有error显示黄色)
+                else:
+                    status_text = "✅ Passed"
+                    status_tag = "status_pass"
+                    color_fg = "#50fa7b"   # 翠绿
+
                 self.tree.insert(
                     "",
                     "end",
                     values=(display_name, status_text, time_text),
                     tags=(tag, status_tag)
                 )
-                # 依据通过与否，配置行文字高亮色 (通过为亮绿，异常为亮红)
-                if info["status"]:
-                    self.tree.tag_configure(tag, foreground="#50fa7b")
-                else:
-                    self.tree.tag_configure(tag, foreground="#ff6b6b")
+                self.tree.tag_configure(tag, foreground=color_fg)
             else:
                 # 关卡尚未开始巡检 (初始状态)
                 self.tree.insert(
@@ -358,7 +354,7 @@ class LogDetailWindow(ctk.CTkToplevel):
         - 底部快捷键提示状态栏
         """
         # ── 1. 顶部导航栏 (Top Navigation Bar) ──
-        nav_frame = tk.Frame(self, bg="#2c3e50", height=45)
+        nav_frame = tk.Frame(self, bg="#2c3e50", height=34)
         nav_frame.pack(fill="x")
         nav_frame.pack_propagate(False)
 
@@ -375,7 +371,7 @@ class LogDetailWindow(ctk.CTkToplevel):
             pady=4,
             activebackground="#4a6785"
         )
-        self.btn_prev.pack(side="left", padx=10, pady=8)
+        self.btn_prev.pack(side="left", padx=6, pady=3)
 
         # 关卡名称居中展示标签
         self.lbl_title = tk.Label(
@@ -385,7 +381,7 @@ class LogDetailWindow(ctk.CTkToplevel):
             fg="#58a6ff",
             font=("Segoe UI", 13, "bold")
         )
-        self.lbl_title.pack(side="left", expand=True, pady=8)
+        self.lbl_title.pack(side="left", expand=True, pady=3)
 
         # Next ▶ 下一站按钮
         self.btn_next = tk.Button(
@@ -400,10 +396,10 @@ class LogDetailWindow(ctk.CTkToplevel):
             pady=4,
             activebackground="#4a6785"
         )
-        self.btn_next.pack(side="right", padx=10, pady=8)
+        self.btn_next.pack(side="right", padx=6, pady=3)
 
         # ── 2. 状态信息栏 (Status Info Bar) ──
-        self.info_frame = tk.Frame(self, bg="#ecf0f1", height=35)
+        self.info_frame = tk.Frame(self, bg="#ecf0f1", height=26)
         self.info_frame.pack(fill="x")
         self.info_frame.pack_propagate(False)
 
@@ -413,9 +409,9 @@ class LogDetailWindow(ctk.CTkToplevel):
             text="",
             bg="#ecf0f1",
             fg="#2c3e50",
-            font=("Consolas", 11)
+            font=("Consolas", -12)
         )
-        self.lbl_info.pack(side="left", padx=15, pady=6)
+        self.lbl_info.pack(side="left", padx=8, pady=3)
 
         # ── 3. 表格渲染区域 (Canvas + Scrollbar 实现可滚动表格) ──
         table_container = tk.Frame(self, bg="#d0d0d0")
@@ -441,8 +437,8 @@ class LogDetailWindow(ctk.CTkToplevel):
 
         # 鼠标滚轮动态绑定机制:
         # 仅当光标进入弹窗 (<Enter>) 时才响应滚轮，光标离开 (<Leave>) 立即注销，防止抢占主界面的滚动操作
-        self.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", self._on_mousewheel))
-        self.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
+        self.bind("<Enter>", lambda e: self.canvas.bind("<MouseWheel>", self._on_mousewheel))
+        self.bind("<Leave>", lambda e: self.canvas.unbind("<MouseWheel>"))
 
         # ── 4. 底部快捷键提示 (Bottom Shortcut Hints) ──
         bottom = tk.Frame(self, bg="#2c3e50", height=28)
@@ -461,10 +457,9 @@ class LogDetailWindow(ctk.CTkToplevel):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_canvas_configure(self, event=None):
-        """确保内嵌表格宽度至少等于画布当前可视宽度，对于宽表格则允许横向滚动自适应"""
-        canvas_width = event.width if event else self.canvas.winfo_width()
-        frame_width = self.table_frame.winfo_reqwidth()
-        self.canvas.itemconfig(self.canvas_window, width=max(frame_width, canvas_width))
+        """Keep natural table widths; wide matrices scroll instead of stretching."""
+        self.canvas.itemconfig(self.canvas_window, width=0)
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def _on_mousewheel(self, event):
         """鼠标滚轮事件响应，按 120 像素步长平滑垂直滚动 Canvas"""
@@ -472,6 +467,26 @@ class LogDetailWindow(ctk.CTkToplevel):
             self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
         except Exception:
             pass
+
+    def _native_header(self, parent, table, start_row, fallback_bg):
+        rows = table.get("header_rows", [])
+        spans = {(span["row"], span["col"]): (span.get("rowspan", 1), span.get("colspan", 1))
+                 for span in table.get("header_spans", [])}
+        covered = set()
+        for (ri, ci), (rs, cs) in spans.items():
+            covered.update((r, c) for r in range(ri, ri+rs) for c in range(ci, ci+cs) if (r, c) != (ri, ci))
+        for ri, row in enumerate(rows):
+            for ci, cell in enumerate(row):
+                if (ri, ci) in covered:
+                    continue
+                text = cell.get("text", "") if isinstance(cell, dict) else str(cell)
+                bg = cell.get("css_bg", fallback_bg) if isinstance(cell, dict) else fallback_bg
+                fg = cell.get("fg", "black") if isinstance(cell, dict) else "black"
+                label = tk.Label(parent, text=text, bg=_tk_color(bg), fg=_tk_color(fg, "black"),
+                    font=("Arial", -12), relief="solid", borderwidth=1, padx=3, pady=1)
+                rs, cs = spans.get((ri, ci), (1, 1))
+                label.grid(row=start_row+ri, column=ci, rowspan=rs, columnspan=cs, sticky="nsew")
+        return len(rows)
 
     def load_data(self):
         """
@@ -512,18 +527,174 @@ class LogDetailWindow(ctk.CTkToplevel):
             lbl.grid(row=0, column=0, padx=30, pady=30, sticky="nw")
             return
 
-        # 7. 更新状态信息栏显示
-        status_icon = "✅ Passed" if data["status"] else "❌ Error"
+        # 7. 更新状态信息栏显示 (三态判定: Error > Warning > Passed)
+        is_pass = data.get("status", False)
+        has_warn = data.get("has_warn", False)
+        if is_pass and not has_warn:
+            # 兼容性兜底推导
+            has_warn = CheckpointStore._detect_has_warn(
+                is_pass, data.get("summary", ""),
+                data.get("tables"), data.get("rows")
+            )
+
+        if not is_pass:
+            status_icon = "❌ Error"
+            status_fg = "#e74c3c"
+        elif has_warn:
+            status_icon = "⚠️ Warning"
+            status_fg = "#d48806"   # 浅灰底 (#ecf0f1) 上的高对比度明亮暖金黄色
+        else:
+            status_icon = "✅ Passed"
+            status_fg = "#27ae60"
+
         self.lbl_info.configure(
             text=f"Inspection Time: {data['timestamp']}  |  Status: {status_icon}"
                  + (f"  |  {data['summary']}" if data.get("summary") else ""),
-            fg="#27ae60" if data["status"] else "#e74c3c"
+            fg=status_fg
         )
 
         # 8. 统一标准化表格数据格式 (兼容多子表格式与旧版单表格式)
         tables = data.get("tables", [])
         if not tables and (data.get("headers") or data.get("rows")):
             tables = [{"title": "", "headers": data.get("headers", []), "rows": data.get("rows", [])}]
+
+        if page_key == "niw_10":
+            tables = forecast_right_tables(tables) or tables
+
+        # DB Server's Show Process links are actions, not inspection data.
+        if page_key == "copier_02":
+            display_tables = []
+            for table in tables:
+                headers = table.get("headers", [])
+                if headers and str(headers[-1]).strip().lower() == "function":
+                    width = len(headers) - 1
+                    table = {**table, "headers": headers[:width],
+                             "rows": [row[:width] for row in table.get("rows", [])],
+                             "header_rows": [row[:width] for row in table.get("header_rows", [])]}
+                    for key in ("header_spans", "cell_spans"):
+                        table[key] = [{**span, "colspan": min(span.get("colspan", 1), width - span["col"])}
+                                      for span in table.get(key, []) if span["col"] < width]
+                display_tables.append(table)
+            tables = display_tables
+
+        # Keep the AP Space summary compact: continue downward, then to the right.
+        if page_key == "copier_04":
+            columns = []
+            for table in tables:
+                rows = table.get("rows", [])
+                for start in range(0, len(rows), 22):
+                    columns.append({**table, "rows": rows[start:start + 22]})
+            tables = columns
+
+        if page_key == "niw_14":
+            colored_tables = []
+            for table in tables:
+                rows = []
+                for row in table.get("rows", []):
+                    colored = []
+                    for index, cell in enumerate(row):
+                        text = str(cell.get("text", "") if isinstance(cell, dict) else cell).strip()
+                        headers = table.get("headers", [])
+                        is_count = index < len(headers) and "count" in str(headers[index]).lower()
+                        try:
+                            count_error = is_count and float(text.replace(",", "")) > 0
+                        except ValueError:
+                            count_error = False
+                        if count_error:
+                            cell = {**(cell if isinstance(cell, dict) else {}), "text": text,
+                                    "bg": "red", "css_bg": "#FF0000", "fg": "#000000"}
+                        elif index > 0 and text.lower() in ("0", "correct"):
+                            cell = {**(cell if isinstance(cell, dict) else {}), "text": text,
+                                    "bg": "green", "css_bg": "#00D000", "fg": "#000000"}
+                        colored.append(cell)
+                    rows.append(colored)
+                colored_tables.append({**table, "rows": rows})
+            tables = colored_tables
+
+        if page_key == "niw_11":
+            colored_tables = []
+            for table in tables:
+                error_columns = {i for i, h in enumerate(table.get("headers", []))
+                                 if str(h).strip().lower() == "error"}
+                rows = []
+                for row in table.get("rows", []):
+                    colored = list(row)
+                    for index in error_columns:
+                        if index >= len(colored):
+                            continue
+                        cell = colored[index]
+                        text = str(cell.get("text", "") if isinstance(cell, dict) else cell).strip()
+                        if text == "0":
+                            colored[index] = {**(cell if isinstance(cell, dict) else {}), "text": text,
+                                              "bg": "green", "css_bg": "#00D000", "fg": "#000000"}
+                    rows.append(colored)
+                colored_tables.append({**table, "rows": rows})
+            tables = colored_tables
+
+        if page_key == "niw_12":
+            colored_tables = []
+            for table in tables:
+                remark_columns = {i for i, h in enumerate(table.get("headers", []))
+                                  if str(h).strip().lower() == "remark"}
+                rows = []
+                for row in table.get("rows", []):
+                    colored = list(row)
+                    for index in remark_columns:
+                        if index >= len(colored):
+                            continue
+                        cell = colored[index]
+                        text = str(cell.get("text", "") if isinstance(cell, dict) else cell).strip()
+                        normal = text.lower() == "correct"
+                        colored[index] = {**(cell if isinstance(cell, dict) else {}), "text": text,
+                                          "bg": "green" if normal else "red",
+                                          "css_bg": "#00D000" if normal else "#FF0000", "fg": "#000000"}
+                    rows.append(colored)
+                colored_tables.append({**table, "rows": rows})
+            tables = colored_tables
+
+        # Hide only explicitly synthetic columns; preserve all native website headers.
+        visible_tables = []
+        for table in tables:
+            headers = table.get("headers", [])
+            hidden = set(table.get("derived_status_columns", []))
+            if page_key == "niw_11":
+                hidden.update(i for i, header in enumerate(headers)
+                              if str(header).strip().lower() in ("type", "last cache"))
+            if page_key == "niw_12":
+                hidden.update(i for i, header in enumerate(headers)
+                              if str(header).strip().lower() in ("type", "last refresh"))
+            projected_rows = []
+            for row in table.get("rows", []):
+                visible = [cell for i, cell in enumerate(row) if i not in hidden]
+                # Some summaries carry their only color in the derived column.
+                # Preserve that signal on the identifier rather than losing an error.
+                hidden_colors = [cell.get("bg") for i, cell in enumerate(row) if i in hidden and isinstance(cell, dict)]
+                visible_colors = [cell.get("bg") for cell in visible if isinstance(cell, dict)]
+                for color in ("red", "yellow", "green"):
+                    if color in hidden_colors:
+                        if visible and color not in visible_colors and not any(c in visible_colors for c in ("red", "yellow")):
+                            first = visible[0]
+                            visible[0] = {**first, "bg": color} if isinstance(first, dict) else {"text": str(first), "bg": color}
+                        break
+                projected_rows.append(visible)
+            projected_native = {}
+            if hidden:
+                keep = [i for i in range(len(headers)) if i not in hidden]
+                if table.get("header_rows"):
+                    projected_native["header_rows"] = [[row[i] for i in keep] for row in table["header_rows"]]
+                for key in ("header_spans", "cell_spans"):
+                    projected_native[key] = []
+                    for span in table.get(key, []):
+                        columns = [i for i in keep if span["col"] <= i < span["col"] + span.get("colspan", 1)]
+                        if columns:
+                            projected_native[key].append({**span, "col": keep.index(columns[0]), "colspan": len(columns)})
+            visible_tables.append({
+                **table,
+                **projected_native,
+                "headers": [header for i, header in enumerate(headers) if i not in hidden],
+                "rows": projected_rows,
+            })
+        tables = visible_tables
 
         # 9. 分支 B: 若没有表格明细 (如只有文字摘要)
         if not tables:
@@ -545,8 +716,37 @@ class LogDetailWindow(ctk.CTkToplevel):
 
         current_grid_row = 0
 
+        punter_indices = []
+        if page_key in ("niw_07", "niw_08"):
+            for index, table in enumerate(tables):
+                headings = " ".join(str(h).lower() for h in table.get("headers", []))
+                if "punter" in table.get("title", "").lower() or ("robot id" in headings and "rpt date" in headings):
+                    punter_indices.append(index)
+        punter_dock = None
+        if punter_indices:
+            punter_dock = tk.Frame(self.table_frame, bg="white")
+            punter_dock.grid(row=len(tables)+1, column=0, columnspan=max(len(tables), 1), sticky="nw")
+
         # ── 11. 循环渲染各个独立子表格 (支持原生单表或多个子表) ──
         for t_idx, tbl in enumerate(tables):
+            # Each website table owns its columns; unrelated tables do not share widths.
+            parent = punter_dock if t_idx in punter_indices else self.table_frame
+            table_grid = tk.Frame(parent, bg="white")
+            if t_idx in punter_indices:
+                table_grid.grid(row=0, column=punter_indices.index(t_idx), sticky="nw", padx=(0, 8), pady=(0, 6))
+            elif page_key == "niw_15":
+                table_grid.grid(row=0, column=t_idx, sticky="nw", padx=(0, 6), pady=(0, 4))
+            elif tbl.get("source") == "website":
+                xs = sorted({t.get("source_x", 0) for t in tables})
+                ys = sorted({t.get("source_y", 0) for t in tables})
+                # Original sibling tables remain side by side instead of becoming one long column.
+                table_grid.grid(row=ys.index(tbl.get("source_y", 0)), column=xs.index(tbl.get("source_x", 0)),
+                                sticky="nw", padx=(0, 6), pady=(0, 6))
+            elif page_key in ("niw_04", "copier_04", "copier_05"):
+                table_grid.grid(row=0, column=t_idx, sticky="nw", padx=(0, 8), pady=(0, 6))
+            else:
+                table_grid.grid(row=t_idx, column=0, sticky="nw", pady=(0, 6))
+            current_grid_row = 0
             sub_title = tbl.get("title", "").strip()
             tbl_headers = tbl.get("headers", [])
             tbl_rows = tbl.get("rows", [])
@@ -555,11 +755,11 @@ class LogDetailWindow(ctk.CTkToplevel):
             # (1) 若定义了子表名称，先渲染子表条目标题栏
             if sub_title:
                 title_lbl = tk.Label(
-                    self.table_frame,
-                    text=f"  ▶ {sub_title}  ",
-                    bg="#2c3e50",
-                    fg="#58a6ff",
-                    font=("Segoe UI", 11, "bold"),
+                    table_grid,
+                    text=sub_title,
+                    bg="#e5e5e5",
+                    fg="#222222",
+                    font=("Arial", -12, "bold"),
                     relief="flat",
                     anchor="w"
                 )
@@ -568,39 +768,53 @@ class LogDetailWindow(ctk.CTkToplevel):
                     column=0,
                     columnspan=max(len(tbl_headers), 1),
                     sticky="ew",
-                    padx=2,
-                    pady=(12 if t_idx > 0 else 4, 4)
+                    padx=0,
+                    pady=(0, 2)
                 )
                 current_grid_row += 1
 
             # (2) 渲染表头单元格行 (加粗文字，工控底色，实线细边框)
-            if tbl_headers:
+            if tbl.get("header_rows"):
+                current_grid_row += self._native_header(table_grid, tbl, current_grid_row, tbl_header_bg)
+            elif tbl_headers:
                 for col_idx, header_text in enumerate(tbl_headers):
                     cell = tk.Label(
-                        self.table_frame,
-                        text=f" {header_text} ",
+                        table_grid,
+                        text=str(header_text),
                         bg=tbl_header_bg,
                         fg=COLOR_HEADER_FG,
-                        font=("Segoe UI", 10, "bold"),
+                        font=("Arial", -12, "bold"),
                         relief="solid",
                         borderwidth=1,
-                        padx=6,
-                        pady=3,
+                        padx=4,
+                        pady=1,
                         anchor="center"
                     )
                     cell.grid(row=current_grid_row, column=col_idx, sticky="nsew")
                 current_grid_row += 1
 
-            # (3) 渲染具体数据行
-            for row_data in tbl_rows:
+            # (3) 渲染具体数据行 (上限保护: 单表最多渲染 200 行，防海量 Label 导致 GDI 耗尽与卡死)
+            MAX_DISPLAY_ROWS = len(tbl_rows) if page_key == "copier_08" else 200
+            display_rows = tbl_rows[:MAX_DISPLAY_ROWS]
+            spans = {}
+            covered = set()
+            for span in tbl.get("cell_spans", []):
+                ri, ci = span["row"], span["col"]
+                rs = min(span.get("rowspan", 1), len(display_rows) - ri)
+                cs = span.get("colspan", 1)
+                if rs < 1:
+                    continue
+                spans[(ri, ci)] = (rs, cs)
+                covered.update((r, c) for r in range(ri, ri+rs) for c in range(ci, ci+cs) if (r, c) != (ri, ci))
+            for row_idx, row_data in enumerate(display_rows):
                 for col_idx, cell_data in enumerate(row_data):
+                    if (row_idx, col_idx) in covered:
+                        continue
                     # 兼容单元格数据类型: 支持原始字典 dict {"text", "bg", "is_link", "fg"} 或简单字符串/数字
-                    is_link = False
                     fg_custom = None
                     if isinstance(cell_data, dict):
                         text = str(cell_data.get("text", "")) if cell_data.get("text") is not None else ""
                         bg_key = cell_data.get("bg", "auto")
-                        is_link = cell_data.get("is_link", False)
                         fg_custom = cell_data.get("fg")
                     else:
                         text = "" if cell_data is None else str(cell_data)
@@ -627,66 +841,61 @@ class LogDetailWindow(ctk.CTkToplevel):
                         bg_color = COLOR_WHITE_BG
                         fg_color = COLOR_BLACK_FG
 
-                    # 超链接样式判断 (如 s0001, d0005, 10.x.x.x, Generate 日期等)
+                    # 单元格文字颜色与字体 (直接以默认黑色普通字体显示，不使用超链接文本与下划线)
                     if fg_custom:
-                        fg_color = fg_custom
-                    elif is_link or self._is_link_text(text, col_idx):
-                        if bg_color == COLOR_WHITE_BG:
-                            fg_color = COLOR_LINK_FG # 赋予网页超链接纯蓝色
+                        fg_color = _tk_color(fg_custom, "black")
 
-                    # 若为链接则附加下划线效果
-                    font_spec = ("Consolas", 10, "underline") if (fg_color == COLOR_LINK_FG) else ("Consolas", 10)
+                    if isinstance(cell_data, dict) and cell_data.get("css_bg"):
+                        bg_color = _tk_color(cell_data["css_bg"])
+                    font_spec = ("Consolas", -12, "underline") if page_key != "niw_15" and isinstance(cell_data, dict) and cell_data.get("is_link") else ("Consolas", -12)
+                    align = cell_data.get("align", "left") if isinstance(cell_data, dict) else "left"
 
                     # 创建单元格 Label
                     cell = tk.Label(
-                        self.table_frame,
-                        text=f" {text} ",
+                        table_grid,
+                        text=text,
                         bg=bg_color,
                         fg=fg_color,
                         font=font_spec,
                         relief="solid",
                         borderwidth=1,
-                        padx=5,
-                        pady=2,
-                        anchor="w"
+                        padx=4,
+                        pady=0,
+                        wraplength=360 if len(text) > 80 else 0,
+                        justify="left",
+                        anchor="center" if align == "center" else ("e" if align == "right" else "w")
                     )
-                    cell.grid(row=current_grid_row, column=col_idx, sticky="nsew")
+                    rs, cs = spans.get((row_idx, col_idx), (1, 1))
+                    cell.grid(row=current_grid_row, column=col_idx, rowspan=rs, columnspan=cs, sticky="nsew")
+                current_grid_row += 1
+
+            # 若数据行数超过限制，添加显著提示行
+            if len(tbl_rows) > MAX_DISPLAY_ROWS:
+                omitted = len(tbl_rows) - MAX_DISPLAY_ROWS
+                max_sub_cols = max(len(tbl_headers), max((len(r) for r in tbl_rows), default=1))
+                notice_cell = tk.Label(
+                    table_grid,
+                    text=f" ⚠️ 仅展示前 {MAX_DISPLAY_ROWS} 行数据，其余 {omitted} 行已省略 (完整明细已保留于本轮巡检数据) ",
+                    bg="#FFF3CD",
+                    fg="#856404",
+                    font=("Consolas", 10, "bold"),
+                    relief="solid",
+                    borderwidth=1,
+                    padx=6,
+                    pady=4,
+                    anchor="w"
+                )
+                notice_cell.grid(row=current_grid_row, column=0, columnspan=max_sub_cols, sticky="nsew")
                 current_grid_row += 1
 
             # 表格之间留出适当空白行
             current_grid_row += 1
 
-        # 12. 均衡网格列宽，使其在窗口中均匀分布
-        all_col_counts = [len(t.get("headers", [])) for t in tables] + [
-            len(r) for t in tables for r in t.get("rows", [])
-        ]
-        max_cols = max(all_col_counts, default=1)
-        for col_idx in range(max_cols):
-            self.table_frame.columnconfigure(col_idx, weight=1)
-
-    @staticmethod
-    def _is_link_text(text: str, col_idx: int) -> bool:
-        """
-        [超链接特征识别规则]
-        静态工具方法：判断某文本是否属于公司系统的可点击链接 (如节点代码、操作按钮、服务器 IP 等)。
-        """
-        s = text.strip()
-        if not s:
-            return False
-
-        # 规则 1: 卫星节点代码 (5 位，以特定字母开头 + 4位数字，如 s0001, d0005, p0001, e1001, j0001)
-        if len(s) == 5 and s[0] in "sdtpekj" and s[1:].isdigit():
-            return True
-
-        # 规则 2: 操作指令特征文字 (如 "Generate 2026-08-12", "Show Process", "Resume", "Release Report")
-        if re.match(r"^Generate \d{4}-", s) or s in ("Show Process", "Resume", "Release Report"):
-            return True
-
-        # 规则 3: 内部私有 IP 地址 (10.x.x.x 格式)
-        if s.startswith("10.") and (len(s.split(".")) == 4):
-            return True
-
-        return False
+        # Anchor compact tables to the top-left; remaining viewport stays blank.
+        self.table_frame.columnconfigure(0, weight=0)
+        self.canvas.xview_moveto(0)
+        self.canvas.yview_moveto(0)
+        self.after_idle(self._on_canvas_configure)
 
     @staticmethod
     def _auto_color(text: str) -> str:
@@ -704,8 +913,8 @@ class LogDetailWindow(ctk.CTkToplevel):
         if "wager cal" in lower:
             return "yellow"
 
-        # 红色: 明确的致命错误/停止运行标识
-        if any(k in lower for k in ("error", "fail", "die", "fatal", "block", "red")):
+        # 红色: 明确的致命错误/停止运行标识 (单词边界正则匹配，杜绝 credit, ordered 等被误伤)
+        if _RED_PATTERN.search(lower):
             return "red"
 
         # 数字推导: 若解析为纯数字且等于 0，视作正常清空状态 (如积压为 0)
@@ -738,10 +947,9 @@ class LogDetailWindow(ctk.CTkToplevel):
         防止在弹窗注销后主界面滚动时抛出已销毁控件引用的异常。
         """
         try:
-            self.canvas.unbind_all("<MouseWheel>")
+            self.canvas.unbind("<MouseWheel>")
         except Exception:
             pass
         if hasattr(self, 'parent_tab') and self.parent_tab:
             self.parent_tab._detail_window = None
         super().destroy()
-

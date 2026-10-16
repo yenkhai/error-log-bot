@@ -19,16 +19,11 @@
 ================================================================================
 """
 
-import sys
-from pathlib import Path
 
-# 自动将项目根目录挂载到 sys.path 中，支持直接按 F5 调试本文件
-project_root = Path(__file__).resolve().parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
 
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
+from core.native_tables import capture_native_tables
 
 class CalculateBetslipsChecker(BaseChecker):
     def check(self) -> bool:
@@ -65,7 +60,10 @@ class CalculateBetslipsChecker(BaseChecker):
             has_any_tier1_error = False
 
             # 4. 自动循环遍历所有下拉公司选项逐一扫描
-            for comp in companies:
+            native_tables = []
+            native_company_count = 0
+            native_group_offset = 0
+            for company_index, comp in enumerate(companies):
                 comp_idx = comp['index']
                 comp_val = comp['value']
                 comp_text = comp['text']
@@ -133,7 +131,7 @@ class CalculateBetslipsChecker(BaseChecker):
 
                                     var uCnt = parseInt(uncalc) || 0;
                                     var isUncalcErr = uCnt > 0;
-                                    
+
                                     // RGB 真实红底检测
                                     function isRed(colorStr) {
                                         if (!colorStr) return false;
@@ -179,6 +177,19 @@ class CalculateBetslipsChecker(BaseChecker):
                     "is_error": is_comp_err
                 })
 
+                try:
+                    captured = capture_native_tables(self.driver)
+                    if captured:
+                        native_company_count += 1
+                        extent = max(t.get('source_y', 0) + 20 * (len(t.get('header_rows', [])) + len(t.get('rows', []))) for t in captured) + 40
+                        for table in captured:
+                            table['title'] = comp_text
+                            table['source_y'] += native_group_offset
+                        native_tables.extend(captured)
+                        native_group_offset += extent
+                except Exception:
+                    pass
+
                 if is_comp_err:
                     has_any_tier1_error = True
                     total_uncalc_all += u_sum
@@ -191,6 +202,9 @@ class CalculateBetslipsChecker(BaseChecker):
                     ]
                     comp_err_lines.extend([f"      -> {p}" for p in comp_data.get("problemDetails", [])])
                     problem_companies_summary.extend(comp_err_lines)
+
+            if native_company_count != len(companies):
+                native_tables = []
 
             # 5. 全量扫描完成后的日志合成输出
             self.log_data_extracted(f"成功完成全部 {len(companies)} 家公司的全量巡检扫描！")
@@ -212,9 +226,11 @@ class CalculateBetslipsChecker(BaseChecker):
                 self.log_data_summary(problem_companies_summary)
                 self.log_check_result(False, f"Calculate Betslips 巡检中发现异常公司，存在 Uncalculate 未计算或 Recalculate 异常，阻断 Checkpoint！")
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                     page_key="niw_05",
                     title="Calculate Betslips",
                     status=False,
+                    tables=native_tables or None,
                     headers=table_headers,
                     rows=table_rows,
                     summary=f"异常: Uncalc={total_uncalc_all}, RecalcErr={total_recalc_err_all}"
@@ -225,11 +241,14 @@ class CalculateBetslipsChecker(BaseChecker):
                 self.log_check_result(True, f"Calculate Betslips 全部 {len(companies)} 家公司巡检通过！")
 
             # 7. 解封并点击 Checkpoint 按钮提交保存
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                 page_key="niw_05",
                 title="Calculate Betslips",
                 status=True,
+                tables=native_tables or None,
                 headers=table_headers,
                 rows=table_rows,
                 summary=f"全部 {len(companies)} 家公司全部 0 积压正常"

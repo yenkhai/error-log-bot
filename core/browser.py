@@ -16,9 +16,12 @@
 
 # 导入底层时间控制模块 time，用于操作缓冲与等待
 import time
-# 导入 socket 模块，用于轻量高效探测本地 9222 端口，不受系统代理干扰
 import socket
-# 导入 pathlib 模块，用于定位本地同级目录下的 chromedriver.exe
+import threading
+import sys
+from urllib.parse import urlsplit, urlunsplit, quote
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 from pathlib import Path
 
 # 导入 Selenium WebDriver 核心库与常用组件
@@ -38,6 +41,9 @@ class BrowserManager:
     """
     # 类的私有静态变量，缓存当前存活的 WebDriver 实例对象
     _driver = None
+    _attached = False
+    # 类级别互斥锁，确保多线程并发调用 get_driver() 时只初始化一个 Chrome 实例
+    _lock = threading.Lock()
 
     # ----------------------------------------------------------------------------
     # 1. CDP 端口存活探针探测
@@ -47,7 +53,7 @@ class BrowserManager:
         """
         [CDP 端口探针函数]
         功能: 探测本地 127.0.0.1:{port} 是否已经运行了具备远程调试功能的 Chrome 浏览器。
-        原理: 
+        原理:
             Chrome 在开启 `--remote-debugging-port=9222` 启动后，会在本地暴露出
             `http://127.0.0.1:9222/json/version` HTTP 接口。
             发送一个超时为 1.0 秒的 GET 请求，若 HTTP 状态码为 200，说明调试端口健康可用！
@@ -72,11 +78,11 @@ class BrowserManager:
         auth_user = config.get("AUTH_USER", "bersih")
         auth_pass = config.get("AUTH_PASS", "bersih428")
 
-        if target_url.startswith("http://"):
-            return target_url.replace("http://", f"http://{auth_user}:{auth_pass}@", 1)
-        elif target_url.startswith("https://"):
-            return target_url.replace("https://", f"https://{auth_user}:{auth_pass}@", 1)
-        return target_url
+        parsed = urlsplit(target_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("Login URL must be an HTTP or HTTPS URL")
+        host = parsed.netloc.rsplit("@", 1)[-1]
+        return urlunsplit(parsed._replace(netloc=f"{quote(auth_user, safe='')}:{quote(auth_pass, safe='')}@{host}"))
 
     # ----------------------------------------------------------------------------
     # 2. 全局获取 / 接管浏览器驱动句柄
@@ -87,73 +93,97 @@ class BrowserManager:
         [核心获取驱动入口]
         执行逻辑:
         1. 优先检查当前内存中的 `cls._driver` 是否依然存活可用，存活则直接复用返回。
-        2. 若内存中无可用驱动，探测 9222 端口；若用户已开启 9222 浏览器，秒级无缝接管！
-        3. 若 9222 端口未开放，启动全新的 Chrome 浏览器，注入 Basic Auth 并自动填充表单登录。
+        2. 若需初始化驱动，使用互斥锁保护，防止多线程并发竞态。
+        3. 动态读取配置端口探测 CDP 调试浏览器，若开放则秒级无缝接管。
+        4. 若未开放，启动全新的 Chrome 浏览器，注入 Basic Auth 并自动填充表单登录。
         """
         # 读取本地配置文件
         config = load_config()
         # 确定目标系统首页链接，优先使用传入的 url，缺省则取配置文件的 LOGIN_URL
         target_url = url or config.get("LOGIN_URL", "http://10.16.250.9/ubah/index.php?")
+        cdp_port = int(config.get("CHROME_DEBUG_PORT", 9222))
 
-        # 检查项目根目录下是否存在配套的本地 chromedriver.exe
-        local_driver = Path(__file__).resolve().parent.parent / "chromedriver.exe"
-        service = Service(executable_path=str(local_driver)) if local_driver.exists() else None
-
-        # 【策略 1】: 优先复用当前 Python 进程中已经持有的 Driver 句柄
+        # 【策略 1】: 快速无锁检查当前 Python 进程中持有的 Driver 是否健在
         if cls._driver is not None:
             try:
-                # 尝试访问 window_handles 属性测试浏览器会话是否依旧存活
                 _ = cls._driver.window_handles
                 return cls._driver  # 依然健在，直接复用返回！
             except Exception:
-                # 若浏览器已被用户手动点 X 关闭，则将缓存引用重置为 None
                 cls._driver = None
 
-        # 【策略 2】: 探针检测 9222 端口 —— 若用户已开启 Checkpoint 浏览器，秒级无缝接管！
-        if cls.is_cdp_active(9222):
+        # 进入双重检查锁定区，确保只有一个线程执行驱动初始化
+        with cls._lock:
+            # 二次检查（防止排队线程在获取锁前已有其他线程初始化完毕）
+            if cls._driver is not None:
+                try:
+                    _ = cls._driver.window_handles
+                    return cls._driver
+                except Exception:
+                    cls._driver = None
+
+            # 检查项目根目录下是否存在配套的本地 chromedriver.exe
+            local_driver = (Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent) / "chromedriver.exe"
+            service = Service(executable_path=str(local_driver)) if local_driver.exists() else None
+
+            # 【策略 2】: 探针检测 CDP 端口 —— 若用户已开启 Checkpoint 浏览器，秒级无缝接管！
+            if cls.is_cdp_active(cdp_port):
+                try:
+                    cdp_options = Options()
+                    cdp_options.add_experimental_option("debuggerAddress", f"127.0.0.1:{cdp_port}")
+
+                    if service:
+                        cls._driver = webdriver.Chrome(service=service, options=cdp_options)
+                    else:
+                        cls._driver = webdriver.Chrome(options=cdp_options)
+
+                    cls._driver.set_page_load_timeout(45)
+                    cls._driver.set_script_timeout(20)
+                    cls._attached = True
+                    return cls._driver
+                except Exception:
+                    cls._driver = None
+
+            # 【策略 3】: 后备保底方案 —— 若未开启调试浏览器，冷启动全新的 Chrome 实例
+            std_options = Options()
+            std_options.add_argument("--start-maximized")
+            std_options.add_argument("--disable-popup-blocking")
+
             try:
-                cdp_options = Options()
-                # 关键设置: 指定 debuggerAddress 挂接到 127.0.0.1:9222 已有浏览器
-                cdp_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-                
-                # 启动接管代理
                 if service:
-                    cls._driver = webdriver.Chrome(service=service, options=cdp_options)
+                    cls._driver = webdriver.Chrome(service=service, options=std_options)
                 else:
-                    cls._driver = webdriver.Chrome(options=cdp_options)
-                
-                # 接管成功，直接返回该浏览器实例，不再重复登录！
+                    cls._driver = webdriver.Chrome(options=std_options)
+
+                cls._attached = False
+                cls._driver.set_page_load_timeout(45)
+                cls._driver.set_script_timeout(20)
+                auth_url = cls._get_authenticated_url(target_url)
+                cls._driver.get(auth_url)
+                cls.auto_fill_login(cls._driver, user, pwd)
                 return cls._driver
-            except Exception:
-                # 若接管失败则安全置空，准备执行后备策略
-                cls._driver = None
+            except Exception as err:
+                if cls._driver is not None:
+                    try:
+                        cls._driver.quit()
+                    except Exception:
+                        pass
+                    cls._driver = None
+                raise Exception(f"连接或启动 Chrome 浏览器失败！详细信息: {err}")
 
-        # 【策略 3】: 后备保底方案 —— 若未开启 9222 调试浏览器，冷启动全新的 Chrome 实例
-        std_options = Options()
-        # 启动时自动全屏最大化，保证页面各类表格和菜单完全展开不缩略
-        std_options.add_argument("--start-maximized")
-        # 禁用浏览器拦截弹出式窗口，确保 Details 弹窗或下载功能不被阻止
-        std_options.add_argument("--disable-popup-blocking")
-
-        try:
-            # 根据是否存在本地 chromedriver.exe 启动全新浏览器实例
-            if service:
-                cls._driver = webdriver.Chrome(service=service, options=std_options)
-            else:
-                cls._driver = webdriver.Chrome(options=std_options)
-
-            # 构造附带 Basic Auth 凭证的安全请求 URL 并打开
-            auth_url = cls._get_authenticated_url(target_url)
-
-            # 打开目标页面
-            cls._driver.get(auth_url)
-            # 自动执行网页表单登录填充
-            cls.auto_fill_login(cls._driver, user, pwd)
-            cls._just_cold_launched = True
-            return cls._driver
-        except Exception as err:
-            # 捕获启动失败并包装抛出清晰错误信息
-            raise Exception(f"连接或启动 Chrome 浏览器失败！详细信息: {err}")
+    @classmethod
+    def quit_driver(cls):
+        """[安全关闭浏览器驱动] 释放 WebDriver 句柄与进程，防止后台孤儿 chromedriver 进程残留"""
+        with cls._lock:
+            if cls._driver is not None:
+                try:
+                    if cls._attached:
+                        cls._driver.service.stop()
+                    else:
+                        cls._driver.quit()
+                except Exception:
+                    pass
+                finally:
+                    cls._driver = None
 
     # ----------------------------------------------------------------------------
     # 3. 独立系统登录工具
@@ -167,12 +197,10 @@ class BrowserManager:
                  不触发任何 Checkpoint 巡检或日志导出任务。
         """
         # 获取驱动
+        previous_driver = cls._driver
         driver = cls.get_driver(url=url, user=user, pwd=pwd)
-
-        # 若刚才经历的是冷启动，get_driver 内部已完成导航和自动登录，避免二次重复提交
-        if getattr(cls, '_just_cold_launched', False):
-            cls._just_cold_launched = False
-            return driver
+        if driver is not previous_driver and not cls._attached:
+            return driver  # 冷启动已完成并验证登录。
 
         # 构造鉴权 URL
         auth_url = cls._get_authenticated_url(url)
@@ -203,7 +231,7 @@ class BrowserManager:
         """
         # 若账号或密码为空，则直接跳过自动填充
         if not user or not pwd:
-            return
+            raise ValueError("Account and password are required")
 
         try:
             # 1. 切换到最外层文档上下文
@@ -247,12 +275,22 @@ class BrowserManager:
                 if submits:
                     # 使用 execute_script 直接在 DOM 层触发 click，彻底避免元素被浮动层遮挡导致的 WebDriver 点击报错
                     driver.execute_script("arguments[0].click();", submits[0])
-                    time.sleep(2.5)  # 等待登录验证重定向完成
+                    cls.wait_for_login(driver)
                 else:
                     # 若页面使用全局 button_login() 函数绑定，直接执行 JS 函数进行提交
                     driver.execute_script("if(typeof button_login === 'function') button_login();")
-                    time.sleep(2.5)
-        except Exception:
-            # 登录表单填充容错，忽略非致命异常，让后续流程继续
-            pass
+                    cls.wait_for_login(driver)
+            else:
+                cls.wait_for_login(driver)
+        except Exception as exc:
+            raise RuntimeError("Login could not be verified; check credentials and the browser page") from exc
 
+
+    @classmethod
+    def wait_for_login(cls, driver):
+        """The application uses a frameset after successful authentication."""
+        driver.switch_to.default_content()
+        WebDriverWait(driver, 20).until(
+            lambda d: bool(d.find_elements(By.CSS_SELECTOR, 'frameset, frame[name="mainFrame"], iframe[name="mainFrame"]'))
+        )
+        return True

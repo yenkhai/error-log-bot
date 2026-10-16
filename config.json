@@ -1,10 +1,11 @@
 {
     "LOGIN_URL": "http://10.16.250.9/ubah/index.php?",
-    "ACCOUNT_MODE": "op35",
     "AUTH_USER": "bersih",
     "AUTH_PASS": "bersih428",
     "CHROME_DEBUG_PORT": 9222,
-    "NIW_STATIONS": 15,
-    "COPIER_STATIONS": 9,
-    "MAX_RECORD_LIMIT": 10000
+    "MAX_RECORD_LIMIT": 10000,
+    "CHECKPOINT_ONLY": {
+        "enabled": false,
+        "pages": []
+    }
 }

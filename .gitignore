@@ -26,3 +26,18 @@ Thumbs.db
 venv/
 env/
 .env
+
+# IDE
+.idea/
+.vscode/
+
+# Virtual Environment
+.venv/
+
+# Chrome Driver
+chromedriver.exe
+
+# Test & Coverage
+.pytest_cache/
+.coverage
+htmlcov/

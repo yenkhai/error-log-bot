@@ -10,7 +10,7 @@
 2. 为什么需要重写 window.confirm 与 window.alert (原生弹窗挂钩 Hook)？
    - 当程序点击弹窗里的 "Patch" 补丁按钮时，浏览器会弹出原生的 JavaScript 对话框：
      `Confirm generate report?` (询问用户是否确认生成报告)。
-   - 自动化驱动程序 (Selenium/ChromeDriver) 如果遇到未经处理的原生弹窗，会直接抛出 
+   - 自动化驱动程序 (Selenium/ChromeDriver) 如果遇到未经处理的原生弹窗，会直接抛出
      `unexpected alert open` 崩溃报错并强制中断！
    - 通过在浏览器 JS 上下文中执行：
      `window.confirm = function() { return true; };`
@@ -59,7 +59,7 @@ class ForecastChecker(BaseChecker):
 
             # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            
+
             # [步骤 3] 全局注入抗弹窗 Hook (拦截浏览器的 Confirm / Alert 询问框)
             # 作用: 防止点击 Patch 按钮时弹出的 "Confirm generate report?" 阻塞程序运行
             self.driver.execute_script("""
@@ -123,7 +123,7 @@ class ForecastChecker(BaseChecker):
             patch_logs = []
             if error_anchors:
                 self.log(f"[AUTO-PATCH] 捕获到左侧矩阵 {len(error_anchors)} 处红底 error 链接，启动真人视角 100% 全量无遗漏 Patch 点击...")
-                
+
                 # 遍历每一个含 error 的单元格 (如 p0008, k0002 等)
                 for idx, item in enumerate(error_anchors):
                     sat = item.get("sat", "Unknown")
@@ -314,6 +314,7 @@ class ForecastChecker(BaseChecker):
             if len(right_errs) > 0:
                 self.log_check_result(False, f"Forecast 巡检发现 Tier 1 致命异常: 右侧 NASA Compare 存在 {len(right_errs)} 项 Remark 非 Correct，强阻断 Checkpoint！")
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                     page_key="niw_10",
                     title="Forecast",
                     status=False,
@@ -329,8 +330,10 @@ class ForecastChecker(BaseChecker):
                 self.log_check_result(True, "Forecast 左右两大板块数据全部校验通过，状态完全正常！")
 
             # [步骤 9] 解封并自动点击 Checkpoint 按钮
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                 page_key="niw_10",
                 title="Forecast",
                 status=True,

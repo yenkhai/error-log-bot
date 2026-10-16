@@ -4,7 +4,7 @@ Error Log 日志自动化抓取与导出引擎服务类 (services/error_log_scra
 --------------------------------------------------------------------------------
 【核心职责】:
 1. 自动化登录并导航至系统内部的 Error Log 页面，自动锚定【Yesterday 昨天】的数据。
-2. 动态计算目标导出文件名 (例如昨天是 8月12日，则桌面文件名为 `error log 1208.txt`)。
+2. 动态计算目标导出文件名 (例如昨天是 2026年10月14日，则桌面文件名为 `error log 2026-10-14.txt`)。
 3. 【断点续传引擎】: 启动时自动扫描桌面已存在的该文件，用正则表达式抓取已导出的 IP 集合，
    跳过已完成项，直接从下一个未完成的服务器开始继续抓取，即使网络崩溃或人为重启也无需从头来过。
 4. 【>10,000 条安全熔断保护】: 如果单台服务器的错误记录数超过 10,000 条，自动跳过并在右侧警报栏
@@ -16,13 +16,15 @@ Error Log 日志自动化抓取与导出引擎服务类 (services/error_log_scra
 
 # 导入正则表达式模块 re，用于精准解析 IP 地址和 records 记录数
 import re
+import os
+import hashlib
 # 导入 urllib.parse 中的 urlparse，用于动态解析主机域名与协议，避免代码中写死固定 IP
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit, urlencode
 # 导入时间控制模块 time，用于阶段切换和防封冷却休眠
 import time
 # 导入 pathlib 模块的 Path 类，用于跨平台管理桌面导出文件
 from pathlib import Path
-# 导入 datetime 和 timedelta，用于精确计算“昨天”的日期并格式化为 DDMM 字符串
+# 导入 datetime 和 timedelta，用于精确计算“昨天”的日期并格式化为 YYYY-MM-DD 字符串
 from datetime import datetime, timedelta
 
 # 导入 Selenium WebDriver 相关组件
@@ -66,14 +68,19 @@ class ErrorLogScraperService:
 
         # 2. 动态提取协议与主机名 (如 "http://10.16.250.9")，避免硬编码
         parsed = urlparse(self.login_url)
-        self.hostname = parsed.hostname or "10.16.250.9"
-        self.base_url = f"{parsed.scheme}://{self.hostname}"
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("Invalid login URL")
+        self.hostname = parsed.hostname
+        self.origin = urlunsplit((parsed.scheme, parsed.netloc.rsplit('@', 1)[-1], '', '', ''))
+        self.failed_ips = {}
+        self.skipped_ips = set()
 
-        # 3. 计算“昨天”的日期，并生成桌面目标导出文件的完整物理路径 (如 Desktop\error log 1208.txt)
+        # 3. 计算“昨天”的日期，并生成桌面目标导出文件的完整物理路径 (如 Desktop\error log 2026-10-14.txt)
         yesterday = datetime.now() - timedelta(days=1)
-        date_str = yesterday.strftime("%d%m")  # 格式化为日+月 (例如 1208)
+        date_str = yesterday.strftime("%Y-%m-%d")  # 包含年份，避免跨年误恢复旧进度
         filename = f"error log {date_str}.txt"
-        self.output_file = Path.home() / "Desktop" / filename
+        from core.paths import desktop_dir
+        self.output_file = desktop_dir() / filename
 
     def log(self, msg: str):
         """
@@ -84,37 +91,35 @@ class ErrorLogScraperService:
         if self.logger:
             self.logger(msg)
 
+    def _append_completed_block(self, ip, body, skipped=False):
+        """A checksum and trailing marker commit one complete server block."""
+        digest = hashlib.sha256(body.encode('utf-8')).hexdigest()
+        kind = 'SKIPPED' if skipped else 'EXPORTED'
+        block = f"\nBEGIN Server {ip} {kind}\n{body}END Server {ip} {digest}\n"
+        self.output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.output_file, 'a', encoding='utf-8', newline='\n') as f:
+            f.write(block)
+            f.flush()
+            os.fsync(f.fileno())
+
     def load_progress(self):
-        """
-        [断点续传进度恢复核心函数]
-        功能:
-        1. 检查桌面是否存在当天的导出文件 `error log DDMM.txt`。
-        2. 若存在，读取其全部内容，通过正则提取所有形如 `Error Message ( 10.x.x.x )` 的 IP 地址。
-        3. 同样通过正则提取所有被标记为 `SKIPPED Server 10.x.x.x:` 的超限跳过 IP。
-        4. 将它们全部装入 `self.processed_ips` 集合中。
-        -> 效果: 即使程序中途意外崩溃或用户手动停止，重新启动时会秒级自动跳过已完成的几十台服务器，
-                 无缝衔接断点继续往后抓取，彻底避免数据重复！
-        """
+        """Restore only complete, checksum-verified blocks; partial writes retry."""
         if not self.output_file.exists():
-            return  # 文件尚不存在，直接返回
+            return
+        content = self.output_file.read_text(encoding='utf-8')
+        pattern = r'BEGIN Server ([\d.]+) (EXPORTED|SKIPPED)\n((?:(?!BEGIN Server ).)*?)END Server \1 ([a-f0-9]{64})\n'
+        for match in re.finditer(pattern, content, re.DOTALL):
+            ip, kind, body, digest = match.groups()
+            if hashlib.sha256(body.encode('utf-8')).hexdigest() == digest:
+                self.processed_ips.add(ip)
+                if kind == 'SKIPPED':
+                    self.skipped_ips.add(ip)
+        if content.strip() and not self.processed_ips:
+            self.log("[WARN] 旧格式或不完整的文件不作为完成凭据；本次将重新抓取并追加完整区块。")
+        self.log(f"[RESUME] 已恢复 {len(self.processed_ips)} 个完整任务；未完成的区块将重试。")
 
-        try:
-            with open(self.output_file, "r", encoding="utf-8") as f:
-                content = f.read()
-                
-                # 正则匹配已正常抓取写入的服务器 IP
-                found_ips = re.findall(r'Error Message \( ([\d\.]+) \)', content)
-                for ip in found_ips:
-                    self.processed_ips.add(ip)
-                
-                # 正则匹配之前已被安全跳过的服务器 IP
-                skipped_ips = re.findall(r'SKIPPED Server ([\d\.]+):', content)
-                for ip in skipped_ips:
-                    self.processed_ips.add(ip)
-
-            self.log(f"[RESUME] 检测到旧导出文件，已自动恢复 {len(self.processed_ips)} 个 IP 任务进度 (无需重复抓取)")
-        except Exception as e:
-            self.log(f"[WARN] 读取断点进度失败: {e}")
+    def _url(self, path, **query):
+        return BrowserManager._get_authenticated_url(self.origin + path + ('?' + urlencode(query) if query else ''))
 
     def login_and_navigate(self, username, password):
         """
@@ -128,7 +133,7 @@ class ErrorLogScraperService:
         try:
             # 统一通过 BrowserManager 获取浏览器实例
             self.driver = BrowserManager.get_driver(user=username, pwd=password)
-            
+
             # 先切回顶层 Frame，确保不卡在未知子框架中
             try:
                 self.driver.switch_to.default_content()
@@ -143,7 +148,7 @@ class ErrorLogScraperService:
             # 若未处于系统页面，则主动发起导航并登录
             if not has_frameset and not has_frames:
                 self.log("[NAVIGATE] 浏览器未在系统页面，正在导航登录...")
-                auth_url = self.login_url.replace("http://", f"http://{self.auth_user}:{self.auth_pass}@")
+                auth_url = BrowserManager._get_authenticated_url(self.login_url)
                 self.driver.get(auth_url)
                 BrowserManager.auto_fill_login(self.driver, username, password)
                 time.sleep(2)
@@ -154,7 +159,7 @@ class ErrorLogScraperService:
             try:
                 self.driver.switch_to.default_content()
                 self.driver.switch_to.frame(0)
-                
+
                 # 点击 Copier & Server 顶层分类选项卡
                 menu = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Copier & Server')]"))
@@ -171,12 +176,12 @@ class ErrorLogScraperService:
             )
             self.driver.execute_script("arguments[0].click();", log_link)
             self.log("🖱️ 已成功点击 Error Log")
-            
+
             # 切回顶层并等待 mainFrame 主内容框架加载就绪
             self.log("等待列表页 mainFrame 渲染加载...")
             self.driver.switch_to.default_content()
             WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
-            
+
         except Exception as e:
             self.log(f"❌ 登录或导航过程出错: {e}")
             raise e
@@ -192,23 +197,23 @@ class ErrorLogScraperService:
         5. 对提取出的任务按 IP 去重，返回任务字典列表 `[{'ip': '10.x.x.x', 'count': 150}, ...]`.
         """
         self.log("\n📥 [阶段一] 全量扫描任务...")
-        self.driver.switch_to.default_content() 
+        self.driver.switch_to.default_content()
         try:
             # 显式等待并切入 mainFrame
             WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.NAME, "mainFrame")))
             self.driver.switch_to.frame("mainFrame")
-        except Exception:
-            self.log("⚠️ 警告：找不到 mainFrame 框架")
+        except Exception as exc:
+            raise RuntimeError("找不到 mainFrame 框架，任务列表未加载") from exc
 
         try:
             # 等待表格行加载完成
             WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "tr")))
-        except TimeoutException:
-            pass
-            
+        except TimeoutException as exc:
+            raise RuntimeError("任务表格未加载") from exc
+
         all_rows = self.driver.find_elements(By.TAG_NAME, "tr")
         self.log(f"🔎 正在分析全表 {len(all_rows)} 行数据...")
-        
+
         unique_tasks = {}
         for row in all_rows:
             try:
@@ -219,7 +224,7 @@ class ErrorLogScraperService:
                     ip_match = re.search(r'(10\.\d{1,3}\.\d{1,3}\.\d{1,3})', row_text)
                     # 匹配 records 前面的具体数字
                     count_match = re.search(r'(\d+)\s*records', row_text, re.IGNORECASE)
-                    
+
                     if ip_match and count_match:
                         found_ip = ip_match.group(1)
                         count = int(count_match.group(1))
@@ -227,7 +232,7 @@ class ErrorLogScraperService:
                         unique_tasks[found_ip] = {'ip': found_ip, 'count': count}
             except Exception:
                 continue
-            
+
         return list(unique_tasks.values())
 
     def process_single_ip(self, ip, count):
@@ -241,23 +246,23 @@ class ErrorLogScraperService:
         4. 使用单次 JavaScript (`execute_script`) 在浏览器内存中直接提取整张表格的所有行与文本！
            -> 彻底消除了 WebDriver 在几百次 HTTP 远程通信上的网络延迟，提速达 500 倍！
         5. 在 Python 内存中以 Error Message 文本为键进行字典自动去重，杜绝重复记录。
-        6. 以追加模式 (`"a"`) 写入桌面 `error log DDMM.txt`。
+        6. 以追加模式 (`"a"`) 写入桌面 `error log YYYY-MM-DD.txt`。
         """
         # 提取 URL 参数 (若以 10. 开头且足够长则截取第 3 位起，符合系统传参习惯)
         url_param = ip[3:] if ip.startswith("10.") and len(ip) > 7 else ip
-        direct_url = f"http://{self.auth_user}:{self.auth_pass}@{self.hostname}/ubah/check_ap/system_tool/check_error_log_popup.php?serverap={url_param}"
-        
+        direct_url = self._url("/ubah/check_ap/system_tool/check_error_log_popup.php", serverap=url_param)
+
         # 浏览器直达目标弹窗页面
         self.driver.get(direct_url)
-        
+
         try:
             # 智能等待至少有数据行加载出来
             WebDriverWait(self.driver, 15).until(
                 lambda d: len(d.find_elements(By.CSS_SELECTOR, "table tr")) >= min(3, count + 1)
             )
-        except TimeoutException:
-            pass
-            
+        except TimeoutException as exc:
+            raise RuntimeError(f"Server {ip} log table did not load") from exc
+
         # 【500倍提速关键】: 用单次 JS 脚本瞬时从 DOM 获取整张表格的所有单元格数据
         table_data = self.driver.execute_script("""
             var rows = document.querySelectorAll("table tr");
@@ -286,131 +291,79 @@ class ErrorLogScraperService:
                 # 组装为制表符分隔的文本行: No \t Date \t Company \t Error Message
                 formatted_line = f"{no_txt}\t{date_txt}\t{comp_txt}\t{error_msg}\n"
                 server_logs[error_msg] = formatted_line
-        
-        # 将去重后的有效错误日志追加写入本地桌面文件
-        if server_logs:
-            with open(self.output_file, "a", encoding="utf-8") as f:
-                # 写入该服务器的区块卡片头
-                header = f"No\tDate\tCompany\tError Message ( {ip} )\n"
-                f.write(header)
-                # 逐行写入去重后的日志
-                for line in server_logs.values():
-                    f.write(line)
-                f.write("\n")
-            self.log(f"   -> ✅ 已保存 {len(server_logs)} 条有效错误明细")
-        else:
-            self.log("   -> (无内容/无错误明细)")
+
+        if count > 0 and not server_logs:
+            raise RuntimeError(f"Server {ip} returned no log details despite {count} records")
+        body = f"No\tDate\tCompany\tError Message ( {ip} )\n" + ''.join(server_logs.values())
+        self._append_completed_block(ip, body)
+        self.log(f"   -> ✅ 已保存 {len(server_logs)} 条去重后的错误明细")
 
     def run(self, username, password):
-        """
-        [核心执行主循环函数]
-        整体生命周期:
-        1. 登录并进入 Error Log 页面。
-        2. 扫描并自动恢复已有进度 (`load_progress`)。
-        3. 扫描主表所有带 records 的待处理 IP 任务。
-        4. 遍历每个任务:
-           - 检查 STOP 标志 (若收到停止信号立即优雅退出)
-           - 检查断点集合 (若该 IP 已处理过，直接跳过)
-           - 检查 >10k 阈值: 若 records > 10,000，触发安全熔断跳过，向 UI 右侧警报栏推送通知
-           - 执行单兵瞬时抓取入库
-           - 记录处理集合并冷却 1 秒
-        5. 网络断开自动重连机制: 捕获 WebDriverException 并自动重新登录接管恢复。
-        6. 完成后不关闭浏览器，导航回主系统，便于 Checkpoint 巡检无缝复用！
-        """
+        """Export tasks, retaining failed IPs for retry and reporting partial results."""
         self.success = False
-        final_tasks = []
+        self.failed_ips = {}
         try:
-            # 登录与初次导航
             self.login_and_navigate(username, password)
-            # 恢复旧导出进度的断点
-            if not self.processed_ips:
-                self.load_progress()
-            # 扫描全量任务列表
-            final_tasks = self.scan_tasks()
-            self.log(f"全表共发现 {len(final_tasks)} 个待处理服务器任务")
-        except Exception as e:
-            self.log(f"程序中断停止 (原因: {e})")
+            self.load_progress()
+            tasks = self.scan_tasks()
+        except Exception as exc:
+            self.log(f"[ERROR] 无法获取任务列表: {exc}")
             return False
-
-        self.log(f"\n[阶段二] 开始逐台服务器抓取...")
-        
-        i = 0
-        ip_retry_counts = {}  # 记录单 IP 重试次数，防止浏览器针对特定损坏 IP 陷入无限重启死循环
-        while i < len(final_tasks):
-            # 检查用户是否在界面点击了 STOP
+        exported = 0
+        resumed = sum(t['ip'] in self.processed_ips for t in tasks)
+        aborted = False
+        for task in tasks:
             if self.stop_flag:
-                self.log("[STOP] 收到用户停止指令，抓取安全中止。")
                 break
-            
-            task = final_tasks[i]
-            ip = task['ip']
-            count = task['count']
-
-            # 【断点续传判断】: 如果当前 IP 已经在已完成集合中，直接跳到下一个
+            ip, count = task['ip'], task['count']
             if ip in self.processed_ips:
-                i += 1 
                 continue
-
-            self.log(f"[{i+1}/{len(final_tasks)}] 正在处理: {ip} (共 {count} 条记录)")
-            
-            # 【>10,000 条安全熔断拦截】
             if count > self.max_record_limit:
-                self.log(f"⚠️ 记录数超标跳过 {ip}: 包含 {count} 条记录 (>10k 阈值)")
-                # 推送到右侧跳过警报框
-                if self.skipper:
-                    self.skipper(ip, count)
-                # 写入文本警报行
-                with open(self.output_file, "a", encoding="utf-8") as f:
-                    f.write(f"!!! SKIPPED Server {ip}: Too many records ({count}) !!!\n\n")
-                self.processed_ips.add(ip)
-                i += 1
-                continue 
-
-            # 执行正常抓取
-            try:
-                self.process_single_ip(ip, count)
-                self.processed_ips.add(ip)
-                self.log(f"⏳ (防风控冷却) 休息 1 秒...")
-                time.sleep(1)
-                i += 1
-
-            except (WebDriverException, ConnectionError) as e:
-                # 网络断线或浏览器意外重启容错恢复
-                self.log(f"🔥 浏览器连接断开! 正在尝试重启自动恢复接管...")
-                ip_retries = ip_retry_counts.get(ip, 0) + 1
-                ip_retry_counts[ip] = ip_retries
-                if ip_retries > 2:
-                    self.log(f"⚠️ IP {ip} 连续重试 {ip_retries} 次仍崩溃，跳过该 IP 推进...")
-                    self.processed_ips.add(ip)
-                    i += 1
-                    continue
                 try:
-                    self.login_and_navigate(username, password)
-                    self.log("✅ 恢复成功，继续重试当前 IP...")
-                except Exception as restart_err:
-                    self.log(f"❌ 自动重启接管失败: {restart_err}。终止程序。")
+                    self._append_completed_block(ip, f"!!! SKIPPED Server {ip}: Too many records ({count}) !!!\n", skipped=True)
+                    self.processed_ips.add(ip)
+                    self.skipped_ips.add(ip)
+                    if self.skipper:
+                        self.skipper(ip, count)
+                except OSError as exc:
+                    self.failed_ips[ip] = str(exc)
+                continue
+            for attempt in range(3):
+                if self.stop_flag:
                     break
-            except Exception as e:
-                self.log(f"❌ 未知处理异常: {e}")
-                self.processed_ips.add(ip)
-                i += 1
-
-        # 关键设计: 绝不调用 driver.quit()！
-        # 浏览器与 Checkpoint 巡检模块共享，只将页面重定向回主系统首页，
-        # 方便用户或其他任务模块继续直接使用当前浏览器会话。
+                try:
+                    self.log(f"[EXPORT] {ip}: {count} records (attempt {attempt + 1}/3)")
+                    self.process_single_ip(ip, count)
+                    self.processed_ips.add(ip)
+                    exported += 1
+                    break
+                except (WebDriverException, ConnectionError) as exc:
+                    self.failed_ips[ip] = str(exc)
+                    if attempt < 2:
+                        try:
+                            self.login_and_navigate(username, password)
+                        except Exception as reconnect_error:
+                            self.failed_ips[ip] = str(reconnect_error)
+                            aborted = True
+                            break
+                except Exception as exc:
+                    self.failed_ips[ip] = str(exc)
+                    self.log(f"[ERROR] {ip}: {exc}")
+                    break
+            if ip in self.processed_ips:
+                self.failed_ips.pop(ip, None)
+            if aborted:
+                break
+        pending = sum(t['ip'] not in self.processed_ips for t in tasks)
+        skipped = sum(t['ip'] in self.skipped_ips for t in tasks)
+        self.success = not self.stop_flag and not aborted and pending == 0 and not self.failed_ips and skipped == 0
         if self.driver:
             try:
                 self.driver.switch_to.default_content()
-                self.driver.get(f"http://{self.auth_user}:{self.auth_pass}@{self.hostname}/ubah/index.php?p=main_system")
-            except Exception:
-                pass
-
-        if self.stop_flag:
-            self.log(f"\n⏹ 抓取已中止（用户请求）。部分导出文件已保存至桌面: {self.output_file}")
-            self.success = False
-            return False
-
-        self.log(f"\n🎉 全部抓取完成！导出文件已保存至桌面: {self.output_file}")
-        self.success = True
-        return True
-
+                self.driver.get(self._url('/ubah/index.php', p='main_system'))
+            except Exception as exc:
+                self.log(f"[WARN] 无法返回系统主页: {exc}")
+        state = '已停止' if self.stop_flag else ('全部导出完成' if self.success else '部分完成，仍有未导出项目')
+        self.log(f"[SUMMARY] {state} | 新导出 {exported} | 恢复进度 {resumed} | 超限跳过 {skipped} | 失败 {len(self.failed_ips)} | 未完成 {pending}")
+        self.log(f"导出文件: {self.output_file}")
+        return self.success

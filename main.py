@@ -2,7 +2,7 @@
 ================================================================================
 主程序启动入口模块 (main.py)
 --------------------------------------------------------------------------------
-【核心职责】: 
+【核心职责】:
 1. 解决 Windows 环境下的控制台编码陷阱 (强制重定向标准输出流为 UTF-8)。
 2. 初始化 CustomTkinter UI 桌面应用程序的主窗口实例 (UnifiedBotApp)。
 3. 启动桌面 GUI 的主事件监听循环 (app.mainloop())，使窗口持续响应用户点击交互。
@@ -41,10 +41,37 @@ def main():
     1. 实例化 UnifiedBotApp 对象，在内存中构建 CustomTkinter 窗口、加载配置并绘制各个功能 Tab。
     2. 调用 mainloop() 进入 Tkinter 事件主循环，保持窗口前台运行并响应用户的按钮点击、输入等事件。
     """
-    # 创建主窗口应用实例
-    app = UnifiedBotApp()
-    # 启动 GUI 主事件循环，程序在此阻塞运行，直到用户关闭软件窗口
-    app.mainloop()
+    try:
+        # 创建主窗口应用实例
+        app = UnifiedBotApp()
+        # 启动 GUI 主事件循环，程序在此阻塞运行，直到用户关闭软件窗口
+        app.mainloop()
+    except Exception as e:
+        import traceback
+        crash_msg = traceback.format_exc()
+        # 尝试写入崩溃日志
+        try:
+            from pathlib import Path
+            from core.paths import data_dir
+            crash_log = data_dir() / "logs" / "crash.log"
+            crash_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(crash_log, "a", encoding="utf-8") as f:
+                from datetime import datetime
+                f.write(f"\n{'='*60}\n")
+                f.write(f"Crash at {datetime.now().isoformat()}\n")
+                f.write(crash_msg)
+        except Exception:
+            pass
+        # 尝试弹窗提示
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Error Log Bot - Fatal Error", f"程序启动失败：\n{e}\n\n详细信息已写入 logs/crash.log")
+            root.destroy()
+        except Exception:
+            pass
 
 # --------------------------------------------------------------------------------
 # 4. 脚本执行入口判断
@@ -53,4 +80,3 @@ def main():
 if __name__ == "__main__":
     # 调用主函数启动整个程序
     main()
-

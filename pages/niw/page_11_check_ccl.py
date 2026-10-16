@@ -45,7 +45,7 @@ class CheckCCLChecker(BaseChecker):
 
             # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            
+
             # [步骤 3] JavaScript 脚本抓取左右两大 CCL 板块
             p11_data = self.driver.execute_script("""
                 // 1. 初始化存储结果的数据结构
@@ -152,6 +152,9 @@ class CheckCCLChecker(BaseChecker):
             right_rows = p11_data.get("rightRows", [])
             right_err_count = p11_data.get("rightErrCount", 0)
 
+            if not left_rows or not right_rows:
+                raise RuntimeError("Check CCL 左右表数据不完整，不能判定通过")
+
             self.log_data_extracted(f"成功抓取 Check CCL ({cat_name}) 数据 | 左侧 NIW Semi Cash: {len(left_rows)} 个节点 (异常 {left_err_count} 项) | 右侧 Credit CCL: {len(right_rows)} 个节点 (异常 {right_err_count} 项)")
             self.log_check_method("全量校验左侧 Check NIW Semi Cash CCL 与右侧 Check Credit CCL 节点的 Error 统计值 (需均为 0 且无红字)")
 
@@ -199,7 +202,8 @@ class CheckCCLChecker(BaseChecker):
                 self.log_check_result(True, "Check CCL 左右两大 CCL 板块全部公司节点 Error 均为 0，状态完全正常！")
 
             # [步骤 6] 状态完全合格，解封并自动点击 Checkpoint
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
                 page_key="niw_11",
                 title="Check CCL",

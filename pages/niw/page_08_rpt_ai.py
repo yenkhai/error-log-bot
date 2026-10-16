@@ -43,7 +43,7 @@ class RPTAIChecker(BaseChecker):
             self.wait_for_page_loaded(seconds=1.5, max_wait=35)
 
             # 4. 执行核心前端 JavaScript 脚本，提取 24 家 Satellite 卫星节点数据矩阵
-            p8_data = self.driver.execute_script("""
+            p8_data = self.driver.execute_script(r"""
                 // 初始化前端解析结果字典
                 var result = {
                     categoryName: "RCM",       // 下拉框分类名 (默认 RCM)
@@ -53,6 +53,7 @@ class RPTAIChecker(BaseChecker):
                     satelliteRows: [],         // 文本摘要行
                     rawRows: [],               // 扁平结构化行
                     mainTableHeaders: [],      // 主矩阵原生表头
+                    mainTableSpans: [],
                     mainTableRows: [],         // 主矩阵原生带色彩数据行
                     punterList: [],            // Punter 列表
                     aiPunterList: []           // AI Punter 列表
@@ -73,24 +74,31 @@ class RPTAIChecker(BaseChecker):
                     // 必须包含 Satellite 或 RPT Punter 等关键词才视为主表格
                     if (txt.indexOf("Satellite") === -1 && txt.indexOf("RPT Punter") === -1 && txt.indexOf("Punter IP") === -1) return;
 
-                    var rows = t.querySelectorAll("tr");
-
-                    rows.forEach(function(r) {
-                        var tds = r.querySelectorAll("td, th");
-                        // 过滤列数不足的数据行 (主矩阵列数通常在 5 列以上)
-                        if (tds.length >= 5) {
-                            var txts = [];
-                            tds.forEach(function(c) { txts.push(c.innerText.trim()); });
-                            var lineTxt = txts.join(" ");
-
-                            // (1) 提取表头
-                            if (result.mainTableHeaders.length === 0 && (lineTxt.indexOf("Satellite") !== -1 || lineTxt.indexOf("Date") !== -1)) {
-                                result.mainTableHeaders = txts;
+                    var rows = Array.from(t.querySelectorAll("tr")).filter(r => r.closest("table") === t);
+                    var grid = [];
+                    rows.forEach(function(row, ri) {
+                        grid[ri] = grid[ri] || [];
+                        var ci = 0;
+                        Array.from(row.children).filter(c => /^(TD|TH)$/.test(c.tagName)).forEach(function(cell) {
+                            while (grid[ri][ci]) ci++;
+                            var rs = cell.rowSpan === 0 ? rows.length-ri : Math.max(cell.rowSpan || 1, 1);
+                            var cs = Math.max(cell.colSpan || 1, 1);
+                            for (var rr=ri; rr<Math.min(ri+rs, rows.length); rr++) {
+                                grid[rr] = grid[rr] || [];
+                                for (var cc=ci; cc<ci+cs; cc++) grid[rr][cc] = cell;
                             }
-
-                            // 忽略子表头或说明装饰行
-                            if (lineTxt.indexOf("Satellite Wager") !== -1 || lineTxt.indexOf("RPT Punter IP") !== -1 || lineTxt.indexOf("Date") !== -1) return;
-
+                            ci += cs;
+                        });
+                    });
+                    var headerCells = [];
+                    var bodyCells = [];
+                    grid.forEach(function(tds, rowIndex) {
+                        var own = Array.from(rows[rowIndex].children).filter(c => /^(TD|TH)$/.test(c.tagName));
+                        // Browser HTML contains empty rows and label-only rowspan rows.
+                        // They have no visible data and must not become extra header rows.
+                        if (!own.length || (own.length === 1 && own[0].rowSpan > 1 && tds.length < grid[0].length)) return;
+                        if (tds.length >= 5 && tds.every(Boolean)) {
+                            var txts = tds.map(c => c.innerText.trim());
                             var sat = "";
                             var dateStartIdx = 2;
 
@@ -104,7 +112,8 @@ class RPTAIChecker(BaseChecker):
                             }
 
                             // 校验是否为合法卫星公司代码
-                            if (sat && sat !== "Satellite" && sat.indexOf("Satellite") === -1) {
+                            if (/^[a-z]{1,4}\d{2,6}$/i.test(sat)) {
+                                bodyCells.push(tds);
                                 result.satellitesCount++;
                                 var cellStatuses = [];
                                 var rowHasErr = false;
@@ -151,9 +160,35 @@ class RPTAIChecker(BaseChecker):
                                     status: rowHasErr ? "ERROR" : "OK",
                                     is_error: rowHasErr
                                 });
+                            } else if (!bodyCells.length) {
+                                headerCells.push(tds);
                             }
                         }
                     });
+                    if (bodyCells.length) {
+                        result.mainTableHeaders = bodyCells[0].map(function(_, col) {
+                            var parts = [], seen = new Set();
+                            headerCells.forEach(function(row) {
+                                var cell = row[col];
+                                if (cell && !seen.has(cell)) {
+                                    if (cell.innerText.trim()) parts.push(cell.innerText.trim());
+                                    seen.add(cell);
+                                }
+                            });
+                            return parts.join('\n') || (col === 0 ? 'Satellite' : 'Col ' + (col+1));
+                        });
+                        var seenBody = new Set();
+                        bodyCells.forEach(function(row, ri) {
+                            row.forEach(function(cell, ci) {
+                                if (seenBody.has(cell)) return;
+                                seenBody.add(cell);
+                                var rs=1, cs=1;
+                                while (ri+rs<bodyCells.length && bodyCells[ri+rs][ci]===cell) rs++;
+                                while (ci+cs<row.length && row[ci+cs]===cell) cs++;
+                                if (rs>1 || cs>1) result.mainTableSpans.push({row:ri,col:ci,rowspan:rs,colspan:cs});
+                            });
+                        });
+                    }
                 });
 
                 // 3. 尝试抓取 Generate Punter / AI Punter 表格 (若存在)
@@ -214,6 +249,7 @@ class RPTAIChecker(BaseChecker):
                     "title": f"RPT AI Satellite Matrix ({cat_name})",
                     "header_bg": "#C8D7A6",
                     "headers": main_headers,
+                    "cell_spans": p8_data.get("mainTableSpans", []),
                     "rows": main_rows
                 })
             else:
@@ -232,6 +268,7 @@ class RPTAIChecker(BaseChecker):
                     "title": f"RPT AI Satellite Matrix ({cat_name})",
                     "header_bg": "#C8D7A6",
                     "headers": table_headers,
+                    "derived_status_columns": [4],
                     "rows": table_rows
                 })
 
@@ -282,7 +319,8 @@ class RPTAIChecker(BaseChecker):
                 self.log_check_result(True, f"RPT AI 全部 {sat_count} 个 Satellite 卫星节点所有子列均显示 'ok' 绿底，巡检合格！")
 
             # 9. 点击 Check Point 打勾通关
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
                 page_key="niw_08",
                 title="RPT AI",

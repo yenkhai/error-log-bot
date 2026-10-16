@@ -5,7 +5,7 @@
 【核心功能详解与学习指南】
 1. 页面功能与抓取目标:
    - 本页面监控的是体育注单与 Wsum 统计是否完全一致 (Wsum & Wager Winloss Compare)。
-   - 抓取字段: Company (公司名称), Type (体育类型如 sport), Total Wsum (总Wsum), 
+   - 抓取字段: Company (公司名称), Type (体育类型如 sport), Total Wsum (总Wsum),
      Total Betslips (总注单数), Remark (备注判定), Last Refresh (最后刷新时间)。
 
 2. 校验与阻断标准 (Tier 1 强阻断):
@@ -41,7 +41,7 @@ class WsumSportChecker(BaseChecker):
 
             # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=1.5, max_wait=35)
-            
+
             # [步骤 3] JavaScript 脚本精准抓取 Wsum Sport 表格数据
             p12_data = self.driver.execute_script("""
                 // 1. 初始化解析结果对象
@@ -93,7 +93,7 @@ class WsumSportChecker(BaseChecker):
                                     // 5. 格式化日志输出字符串
                                     var line = com + " (" + type + "): Total Wsum = " + wsum + ", Total Betslips = " + betslips + ", Remark = " + remark + tag;
                                     result.rows.push(line);
-                                    
+
                                     // 6. 存入结构化数据列表
                                     result.rawRows.push({
                                         company: com,
@@ -119,6 +119,9 @@ class WsumSportChecker(BaseChecker):
             raw_rows = p12_data.get("rawRows", [])
             err_count = p12_data.get("errCount", 0)
             err_list = p12_data.get("errList", [])
+
+            if not raw_rows:
+                raise RuntimeError("Wsum Sport 未读取到公司数据，不能判定通过")
 
             self.log_data_extracted(f"成功抓取 Wsum Sport ({cat_name}) 数据 | 监控节点: {len(rows)} 项 (异常 {err_count} 项)")
             self.log_check_method("全量校验 Wsum Sport 所有公司节点的 Remark 必须为 Correct (Tier 1 强阻断)")
@@ -150,6 +153,7 @@ class WsumSportChecker(BaseChecker):
             if err_count > 0:
                 self.log_check_result(False, f"Wsum Sport 巡检发现 Tier 1 致命异常: 存在 {err_count} 项 Remark 非 Correct ({', '.join(err_list)})，强阻断 Checkpoint！")
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                     page_key="niw_12",
                     title="Wsum Sport",
                     status=False,
@@ -162,8 +166,10 @@ class WsumSportChecker(BaseChecker):
                 self.log_check_result(True, "Wsum Sport 全部公司节点 Remark 均为 Correct，状态完全正常！")
 
             # [步骤 6] 解封并自动点击 Checkpoint
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                 page_key="niw_12",
                 title="Wsum Sport",
                 status=True,

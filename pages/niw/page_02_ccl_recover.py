@@ -2,7 +2,7 @@
 ================================================================================
 第2站 CCL Recover 关卡检查器 (pages/niw/page_02_ccl_recover.py)
 --------------------------------------------------------------------------------
-作用: 
+作用:
 1. 导航进入 CCL Recover 页面 (Menu ID: apy_b0i3text)。
 2. 自动在 <select id="comp_options"> 选中 RCM，并触发 Search 刷新全表。
 3. 抓取红框内所有 Company (RCM/LRCM)、Satellite (如 nv01-s0001) 以及 Last Recover 时间状态。
@@ -73,11 +73,11 @@ class CCLRecoverChecker(BaseChecker):
                             if (satText && timeTd) {
                                 totalSatellites++;
                                 var timeText = timeTd.innerText.trim(); // 时间文本
-                                
+
                                 // 🌟 核心点：获取计算后（Computed Style）的背景 RGB 颜色
                                 var style = window.getComputedStyle(timeTd);
                                 var bg = style.backgroundColor;
-                                
+
                                 var isRed = false;
                                 var isGreen = false;
 
@@ -140,6 +140,9 @@ class CCLRecoverChecker(BaseChecker):
             total_satellites = ccl_data.get("totalSatellites", 0)
             error_count = ccl_data.get("errorCount", 0)
 
+            if not raw_rows:
+                raise RuntimeError("CCL Recover 未读取到 Satellite 数据，不能判定通过")
+
             self.log_data_extracted(f"成功抓取到全表 {total_satellites} 个 Satellite 节点 (异常节点数: {error_count})")
             self.log_check_method("深度读取 Last Recover 单元格背景 RGB 颜色 (绿底为 OK/正常, 红底/非绿底为 ERROR/异常)")
 
@@ -166,6 +169,7 @@ class CCLRecoverChecker(BaseChecker):
                     self.log(f"  - {err}")
                 self.log_check_result(False, "CCL Recover [Error] 发现非绿底/红底异常")
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                     page_key="niw_02",
                     title="CCL Recover",
                     status=False,
@@ -179,8 +183,10 @@ class CCLRecoverChecker(BaseChecker):
                 self.log_check_result(True, f"CCL Recover 巡检通过，全表 {total_satellites} 个 Satellite 全部显示绿底正常。")
 
             # 9. 巡检通过后解封并点击页面上的 Checkpoint 打勾按钮
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                 page_key="niw_02",
                 title="CCL Recover",
                 status=True,

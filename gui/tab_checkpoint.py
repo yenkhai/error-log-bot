@@ -1,3 +1,5 @@
+from config import save_config
+from core.stations import STATION_LIST
 """
 ================================================================================
 Checkpoint 自动化巡检选项卡 UI 模块 (gui/tab_checkpoint.py)
@@ -5,8 +7,7 @@ Checkpoint 自动化巡检选项卡 UI 模块 (gui/tab_checkpoint.py)
 作用与设计解析:
 1. Checkpoint 巡检中枢核心: 串联调度 NIW 15 个业务关卡与 Copier 9 个服务器关卡。
 2. 弹性执行模式:
-   - 【Check All】全量贯通巡检: 先执行 NIW 1~15 关，全部通关后自动切入 Copier 1~9 关。
-   - 【Check NIW】/【Check Copier】: 支持单独针对业务或服务器分区进行专项巡检。
+   - 【Check】按勾选项巡检: 先执行勾选的 NIW 关卡，再执行勾选的 Copier 关卡。
    - 【Stop】优雅软停止: 设置停止标志位，允许当前正在执行的网页完整保存后安全退出，不破坏现场。
    - 【Resume】断点续传: 自动记录上一次发生阻断/异常的关卡索引与类型，一键从中断点原地重新尝试。
    - 【Skip】跳过打勾: 强制在当前异常关卡点击页面 Checkpoint 打勾，标记通过并推进到下一关。
@@ -39,11 +40,10 @@ except ImportError:
 # 导入 Tkinter 原生 GUI 核心与 CustomTkinter 现代控件库
 import tkinter as tk
 import customtkinter as ctk
-
-# 导入日期时间模块，用于记录每个关卡巡检完成的精确物理时间
 from datetime import datetime
 
 # 导入浏览器核心驱动管理器，用于获取/连接 Chrome 单例
+from core.compact_log import compact_message
 from core.browser import BrowserManager
 
 # 导入检查器基类，用于在所有关卡通关后执行导航回到第一关、以及在 Skip 时执行通用打勾
@@ -53,34 +53,8 @@ from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
 
 # ── 导入所有 15 个 NIW 业务关卡检查器 ──
-from pages.niw.page_01_pending_wager import PendingWagerChecker
-from pages.niw.page_02_ccl_recover import CCLRecoverChecker
-from pages.niw.page_03_matches_wagers import MatchesWagersChecker
-from pages.niw.page_04_result_process import ResultProcessChecker
-from pages.niw.page_05_calculate_betslips import CalculateBetslipsChecker
-from pages.niw.page_06_rpt_polymarket import RPTPolyMarketChecker
-from pages.niw.page_07_rpt_compare import RPTCompareChecker
-from pages.niw.page_08_rpt_ai import RPTAIChecker
-from pages.niw.page_09_rpt_compare_utc import RPTCompareUTCChecker
-from pages.niw.page_10_forecast import ForecastChecker
-from pages.niw.page_11_check_ccl import CheckCCLChecker
-from pages.niw.page_12_wsum_sport import WsumSportChecker
-from pages.niw.page_13_hg_percentages import HGPercentagesChecker
-from pages.niw.page_14_rpt_crs import RPTCRSChecker
-from pages.niw.page_15_one_wallet_pending import OneWalletPendingChecker
-
-# ── 导入所有 9 个 Copier & Server 基础设施关卡检查器 ──
-from pages.copier_server.page_01_copier import CopierChecker
-from pages.copier_server.page_02_db_server_status import DBServerStatusChecker
-from pages.copier_server.page_03_ap_server_status import APServerStatusChecker
-from pages.copier_server.page_04_check_ap_space import CheckAPSpaceChecker
-from pages.copier_server.page_05_error_log import ErrorLogChecker
-from pages.copier_server.page_06_redis_server import RedisServerChecker
-from pages.copier_server.page_07_robot_monitor import RobotMonitorChecker
-from pages.copier_server.page_08_niw_robot_monitor import NIWRobotMonitorChecker
-from pages.copier_server.page_09_info_robot_monitor import InfoRobotMonitorChecker
-
-
+from services.checkpoint_engine import CheckpointEngine
+from core.stations import STATIONS
 # ─────────────────────────────────────────────────────────────────────────────
 #  彩色日志标签配置字典 (LOG_TAGS)
 #  结构: tag_name -> (foreground_color 十六进制色彩, is_bold 布尔值)
@@ -92,9 +66,9 @@ LOG_TAGS = {
     "station":     ("#8BE9FD", True),    # 青蓝粗体 — 关卡站头 / 分区标题 / ===
     "checkpoint":  ("#50FA7B", True),    # 翠绿粗体 — CHECKPOINT 打勾成功
     "stop":        ("#FF79C6", True),    # 粉红粗体 — 用户主动点击 STOP
+    "noon_fast":   ("#F1FA8C", True),    # 明黄粗体 — 美东午间快速通关提示
     "info":        ("#C9D1D9", False),   # 舒适白灰 — 普通说明与正常数据行
     "dim":         ("#555E70", False),   # 低调暗灰 — 分隔横线
-    "data":        ("#D8DEE9", False),   # 干净浅灰 — 数据表格明细
 }
 
 
@@ -104,6 +78,14 @@ def _classify_tag(line: str) -> str:
     根据单行日志的文本语义特征，精确匹配返回 LOG_TAGS 中对应的色彩样式标签，
     确保致命异常 100% 呈现醒目亮红粗体，普通成功呈翠绿，标题呈青蓝。
     """
+    # Structured outcomes take priority over words such as "Tier 1 = 0" or "不阻断".
+    if line.startswith(("[RESULT]", "[DETAIL]")):
+        if "❌" in line:
+            return "error"
+        if "⚠" in line:
+            return "warn"
+        if "✅" in line:
+            return "success"
     u = line.upper()
 
     # 1. 错误 / 阻断 / 异常分类 (最高优先级：高亮鲜红粗体 #FF4D4D)
@@ -111,7 +93,11 @@ def _classify_tag(line: str) -> str:
        any(k in u for k in ["[ERROR]", "FAILED", "TIER 1", "TIER1", "[INTERRUPT]", "RED NODE", "ERROR/", "[ERROR/"]):
         return "error"
 
-    # 2. 警告 / 仅提示分类 (暖橙粗体 #FFB86C)
+    # 2. 美东午间快速通关分类 (明黄粗体 #F1FA8C)
+    if "[NOON FAST]" in u or "NOON FAST" in u:
+        return "noon_fast"
+
+    # 3. 警告 / 仅提示分类 (暖橙粗体 #FFB86C)
     if any(k in line for k in ["🟡", "⚠️", "⚠", "警告", "提醒", "仅通知", "仅提示"]) or \
        any(k in u for k in ["[WARN]", "[NOTICE]", "TIER 3", "TIER3", "WARNING", "WARN/", "[WARN/"]):
         return "warn"
@@ -143,7 +129,7 @@ def _classify_tag(line: str) -> str:
     return "info"
 
 
-class CheckpointTab(ctk.CTkFrame):
+class CheckpointTab(ctk.CTkFrame, CheckpointEngine):
     """
     Checkpoint 自动化巡检控制中心视图类
     负责巡检线程生命周期管理、断点记录、关卡矩阵勾选、定时调度倒计时及彩色控制台渲染。
@@ -162,17 +148,27 @@ class CheckpointTab(ctk.CTkFrame):
 
         # 4. 断点续传记录变量 (记录最后一次失败阻断的关卡信息)
         self.last_failed_type = None     # "NIW" 或 "Copier"
+        self.paused_station = None       # 手动暂停位置 (section, index)，与失败断点独立
         self.last_failed_index = 0       # 关卡在列表中的 0-based 绝对索引
 
         # 5. 关卡矩阵面板的显示/折叠状态 (默认展开 True)
         self.matrix_visible = True
 
-        # 6. 本轮巡检结果元组列表 [(page_key, display_name, bool_result, timestamp)]
-        self._run_results = []
+        # 6. 本轮巡检流水线执行模式 (FULL/NIW/COPIER)
+        self.current_pipeline_mode = "FULL"
 
         # 7. 24 个关卡的复选框布尔追踪变量列表 (默认全部打勾 True)
         self.niw_vars    = [ctk.BooleanVar(value=True) for _ in range(15)]
         self.copier_vars = [ctk.BooleanVar(value=True) for _ in range(9)]
+        self.niw_checkpoint_only_vars = [ctk.BooleanVar(value=False) for _ in range(15)]
+        self.copier_checkpoint_only_vars = [ctk.BooleanVar(value=False) for _ in range(9)]
+        bypass = self.app.config_data.get("CHECKPOINT_ONLY", {})
+        self.checkpoint_only_enabled = ctk.BooleanVar(value=bool(bypass.get("enabled", False)))
+        selected_keys = set(bypass.get("pages", []))
+        for index, (key, _) in enumerate(STATION_LIST):
+            variables = self.niw_checkpoint_only_vars if index < 15 else self.copier_checkpoint_only_vars
+            variables[index if index < 15 else index - 15].set(key in selected_keys)
+        self._checkpoint_only_dialog = None
 
         # 8. 定时自动巡检控制变量
         self.hourly_auto_var = ctk.BooleanVar(value=True) # 定时自动开关 (默认开启)
@@ -184,7 +180,12 @@ class CheckpointTab(ctk.CTkFrame):
         # 9. 异常声音报警开关变量 (默认开启 True)
         self.sound_alert_var = ctk.BooleanVar(value=True)
 
-        # 10. 组装所有控件并初始化按钮状态
+        # 10. 美东午间快速通关控制变量 (12:00-14:00 自动跳过未结关卡，默认开启 True)
+        self.noon_fast_mode_var = ctk.BooleanVar(value=True)
+        self.noon_early_exit_today = False
+        self.last_noon_check_date = None
+
+        # 11. 组装所有控件并初始化按钮状态
         self.build_ui()
 
     # ─────────────────────────────────────────────────────────────────
@@ -193,7 +194,7 @@ class CheckpointTab(ctk.CTkFrame):
     def build_ui(self):
         """
         构建 Checkpoint 选项卡的全部控件结构:
-        1. 顶层主控制按钮栏 (Check All, Check NIW, Check Copier, Stop, Resume, Skip, Collapse, Clear)
+        1. 顶层主控制按钮栏 (Check, Stop, Resume, Skip, Collapse, Clear)
         2. 定时自动调度控制条 (Auto Schedule 开关、周期下拉菜单、Sound Alert 报警开关、状态倒计时)
         3. 关卡自定义勾选矩阵 (NIW 15 关 + Copier 9 关，支持全选/反选)
         4. 多色 Console 终端控制台 (带双向滚动条，支持标签高亮)
@@ -202,41 +203,17 @@ class CheckpointTab(ctk.CTkFrame):
         top_frame = ctk.CTkFrame(self)
         top_frame.pack(fill="x", padx=10, pady=(10, 5))
 
-        # ▶ 【Check All】全量贯通巡检按钮 (先跑 NIW 15 关，再接 Copier 9 关)
-        self.btn_run_all = ctk.CTkButton(
+        # 按下方勾选项执行，顺序为 NIW → Copier。
+        self.btn_check = ctk.CTkButton(
             top_frame,
-            text="Check All",
+            text="Check",
             command=self.start_full_thread,
             fg_color="#1f538d",
             hover_color="#14375e",
             font=ctk.CTkFont(weight="bold"),
             width=105
         )
-        self.btn_run_all.pack(side="left", padx=3, pady=5)
-
-        # ▶ 【Check NIW】仅运行 NIW 业务区 15 关
-        self.btn_run_niw = ctk.CTkButton(
-            top_frame,
-            text="Check NIW",
-            command=self.start_niw_only_thread,
-            fg_color="#16a085",
-            hover_color="#117864",
-            font=ctk.CTkFont(weight="bold"),
-            width=95
-        )
-        self.btn_run_niw.pack(side="left", padx=3, pady=5)
-
-        # ▶ 【Check Copier】仅运行 Copier 服务器基础设施区 9 关
-        self.btn_run_copier = ctk.CTkButton(
-            top_frame,
-            text="Check Copier",
-            command=self.start_copier_only_thread,
-            fg_color="#27ae60",
-            hover_color="#1e8449",
-            font=ctk.CTkFont(weight="bold"),
-            width=100
-        )
-        self.btn_run_copier.pack(side="left", padx=3, pady=5)
+        self.btn_check.pack(side="left", padx=3, pady=5)
 
         # ⏹ 【Stop】停止按钮 (软停止：当前正在抓取的页面完成后立即优雅停机)
         self.btn_stop = ctk.CTkButton(
@@ -294,6 +271,9 @@ class CheckpointTab(ctk.CTkFrame):
             width=65
         )
         self.btn_clear.pack(side="right", padx=3, pady=5)
+        ctk.CTkSwitch(top_frame, text="仅 Checkpoint", variable=self.checkpoint_only_enabled,
+                      command=self._toggle_checkpoint_only, progress_color="#d48806", width=120).pack(side="left", padx=(12, 4))
+        ctk.CTkButton(top_frame, text="设置", width=48, command=self._open_checkpoint_only_dialog).pack(side="left", padx=3)
 
         # ── 1.5 定时自动巡检调度控制栏 (Hourly Auto-Run Scheduler Bar) ──
         schedule_frame = ctk.CTkFrame(self, fg_color="#1a202c", corner_radius=6)
@@ -333,6 +313,18 @@ class CheckpointTab(ctk.CTkFrame):
         )
         self.switch_sound.pack(side="right", padx=(6, 12), pady=4)
 
+        # 美东午间快速通关开关 (12:00-14:00 自动开启，默认开启，支持随时手动启闭)
+        self.switch_noon_fast = ctk.CTkSwitch(
+            schedule_frame,
+            text="⚡ Noon Fast (12-2pm)",
+            variable=self.noon_fast_mode_var,
+            command=self._on_noon_fast_toggle,
+            font=ctk.CTkFont(weight="bold", size=11),
+            progress_color="#f39c12",
+            width=46
+        )
+        self.switch_noon_fast.pack(side="right", padx=(6, 6), pady=4)
+
         # 调度状态动态指示标签 (展示当前倒计时、执行中轮次或暂停状态)
         self.lbl_schedule_status = ctk.CTkLabel(
             schedule_frame,
@@ -347,12 +339,7 @@ class CheckpointTab(ctk.CTkFrame):
         self.select_frame.pack(fill="x", padx=10, pady=5)
 
         # (1) NIW 业务关卡子区域 (15 关)
-        niw_names = [
-            "1.Pending Wager", "2.CCL Recover", "3.Matches Wagers", "4.Result Process",
-            "5.Calculate Betslips", "6.RPT PolyMarket", "7.RPT Compare", "8.RPT AI",
-            "9.RPT Compare UTC", "10.Forecast", "11.Check CCL", "12.Wsum Sport",
-            "13.HG Percentages", "14.RPT CRS", "15.1 Wallet Pending"
-        ]
+        niw_names = [key.rsplit("_", 1)[1] + ". " + title.split(" - ", 1)[1] for key, title, _ in STATIONS if key.startswith("niw_")]
         self._build_station_matrix(
             self.select_frame,
             title="[CONFIG] NIW Stations (Default: Select All):",
@@ -361,10 +348,7 @@ class CheckpointTab(ctk.CTkFrame):
         )
 
         # (2) Copier & Server 基础设施关卡子区域 (9 关)
-        copier_names = [
-            "1.Copier", "2.DB Server", "3.AP Server", "4.AP Space", "5.Error Log",
-            "6.Redis", "7.Robot Monitor", "8.NIW Robot", "9.Info Robot"
-        ]
+        copier_names = [key.rsplit("_", 1)[1] + ". " + title.split(" - ", 1)[1] for key, title, _ in STATIONS if key.startswith("copier_")]
         self._build_station_matrix(
             self.select_frame,
             title="[CONFIG] Copier & Server Stations (Default: Select All):",
@@ -453,9 +437,76 @@ class CheckpointTab(ctk.CTkFrame):
         grid = ctk.CTkFrame(box, fg_color="transparent")
         grid.pack(fill="x", padx=5, pady=(0, 5))
         for i, name in enumerate(names):
-            ctk.CTkCheckBox(
-                grid, text=name, variable=vars_list[i], font=ctk.CTkFont(size=11)
-            ).grid(row=i // cols, column=i % cols, sticky="w", padx=4, pady=2)
+            ctk.CTkCheckBox(grid, text=name, variable=vars_list[i], font=ctk.CTkFont(size=11)).grid(
+                row=i // cols, column=i % cols, sticky="w", padx=4, pady=2)
+
+    def _save_checkpoint_only(self, enabled, pages):
+        updated = {**self.app.config_data, "CHECKPOINT_ONLY": {"enabled": enabled, "pages": pages}}
+        if not save_config(updated):
+            self.log("[ERROR] 无法保存仅 Checkpoint 设置，请重试。")
+            return False
+        self.app.config_data = updated
+        self.checkpoint_only_enabled.set(enabled)
+        for index, (key, _) in enumerate(STATION_LIST):
+            variables = self.niw_checkpoint_only_vars if index < 15 else self.copier_checkpoint_only_vars
+            variables[index if index < 15 else index - 15].set(key in pages)
+        self.log(f"[SETTINGS] 仅 Checkpoint {'开启' if enabled else '关闭'}，已保存 {len(pages)} 个页面；下次启动检查时应用。")
+        return True
+
+    def _toggle_checkpoint_only(self):
+        if self.checkpoint_only_enabled.get():
+            self._open_checkpoint_only_dialog()
+        else:
+            pages = self.app.config_data.get("CHECKPOINT_ONLY", {}).get("pages", [])
+            if not self._save_checkpoint_only(False, pages):
+                self.checkpoint_only_enabled.set(True)
+
+    def _open_checkpoint_only_dialog(self):
+        if self._checkpoint_only_dialog and self._checkpoint_only_dialog.winfo_exists():
+            self._checkpoint_only_dialog.focus()
+            return
+        saved = self.app.config_data.get("CHECKPOINT_ONLY", {})
+        dialog = ctk.CTkToplevel(self)
+        self._checkpoint_only_dialog = dialog
+        dialog.title("选择仅 Checkpoint 的页面")
+        owner = self.winfo_toplevel()
+        owner.update_idletasks()
+        width, height = 660, 640
+        x = owner.winfo_rootx() + (owner.winfo_width() - width) // 2
+        y = owner.winfo_rooty() + (owner.winfo_height() - height) // 2
+        x = max(0, min(x, owner.winfo_screenwidth() - width))
+        y = max(0, min(y, owner.winfo_screenheight() - height))
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.transient(owner)
+        ctk.CTkLabel(dialog, text="勾选的页面不检查数据，只提交 Checkpoint", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=(15, 4))
+        ctk.CTkLabel(dialog, text="保存后每次手动／自动检查都应用，直到关闭总开关。", text_color="#f0ad4e").pack(pady=(0, 10))
+        body = ctk.CTkScrollableFrame(dialog)
+        body.pack(fill="both", expand=True, padx=16)
+        choices = {}
+        for index, (key, title) in enumerate(STATION_LIST):
+            if index in (0, 15):
+                ctk.CTkLabel(body, text="NIW" if index == 0 else "Copier & Server", font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(12, 5))
+            variable = ctk.BooleanVar(value=key in saved.get("pages", []))
+            choices[key] = variable
+            ctk.CTkCheckBox(body, text=title, variable=variable).pack(anchor="w", padx=8, pady=4)
+        def cancel():
+            self.checkpoint_only_enabled.set(bool(self.app.config_data.get("CHECKPOINT_ONLY", {}).get("enabled", False)))
+            dialog.destroy()
+            self._checkpoint_only_dialog = None
+        def confirm():
+            pages = [key for key, variable in choices.items() if variable.get()]
+            if self._save_checkpoint_only(True, pages):
+                dialog.destroy()
+                self._checkpoint_only_dialog = None
+        buttons = ctk.CTkFrame(dialog, fg_color="transparent")
+        buttons.pack(fill="x", padx=16, pady=12)
+        ctk.CTkButton(buttons, text="Deselect All", width=105,
+                      command=lambda: self.set_all_vars(list(choices.values()), False)).pack(side="left", padx=5)
+        ctk.CTkButton(buttons, text="取消", width=90, fg_color="#555555", command=cancel).pack(side="right", padx=5)
+        ctk.CTkButton(buttons, text="确定并保存", width=120, command=confirm).pack(side="right", padx=5)
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.after(100, dialog.grab_set)
+
     def toggle_matrix_panel(self):
         """[折叠/展开关卡矩阵] 切换矩阵面板的显隐状态，释放纵向日志视窗空间"""
         if self.matrix_visible:
@@ -477,6 +528,10 @@ class CheckpointTab(ctk.CTkFrame):
         [多色日志追加方法]
         线程安全地向彩色日志控制台追加一行文字，自动通过 _classify_tag 分配色彩标签并滚动到最底端。
         """
+        message = compact_message(message)
+        if message is None:
+            return
+
         def append():
             tag = _classify_tag(message)
             self.log_text.configure(state="normal")
@@ -490,7 +545,7 @@ class CheckpointTab(ctk.CTkFrame):
             self.log_text.insert("end", message + "\n", tag)
             self.log_text.see("end")
             self.log_text.configure(state="disabled")
-        self.after(0, append)
+        self.app.post_ui(append)
 
     def clear_log(self):
         """[清空日志] 清空当前控制台的所有历史记录"""
@@ -566,10 +621,10 @@ class CheckpointTab(ctk.CTkFrame):
             self.next_run_timestamp = None
         else:
             # 状态 2: 当前处于空闲状态
-            if self.last_failed_type is not None:
+            if self.last_failed_type is not None or self.paused_station is not None:
                 # 存在未解决的中断阻断，暂停自动巡检保护现场
                 self.lbl_schedule_status.configure(
-                    text=f"[Status] ⚠️ Paused ({self.last_failed_type} Error)",
+                    text=f"[Status] ⚠️ Paused ({self.last_failed_type + ' Error' if self.last_failed_type else 'Stopped by user'})",
                     text_color="#FF4D4D"
                 )
             else:
@@ -606,6 +661,50 @@ class CheckpointTab(ctk.CTkFrame):
         # 每隔 1 秒递归调度下一跳心跳
         self.hourly_timer_id = self.after(1000, self._hourly_tick)
 
+    # ─────────────────────────────────────────────────────────────────
+    #  美东午间快速通关核心逻辑 (Noon Fast Checkpoint Mode: 12:00 - 14:00)
+    # ─────────────────────────────────────────────────────────────────
+    def is_noon_fast_mode_active(self) -> bool:
+        """
+        [美东午间快速通关激活判定]
+        判定当前是否处于 12:00-14:00 快速通关时间窗口：
+        1. 用户开关必须为开启状态 (self.noon_fast_mode_var.get() == True)
+        2. 当前时间处于中午 12:00 至 14:00 之间 (12 <= now.hour < 14)
+        3. 今日尚未因 Matches & Wagers 0 积压而提前结束 (not self.noon_early_exit_today)
+        """
+        if not self.run_settings["noon_fast"]:
+            return False
+
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+
+        # 每日跨天自动重置提前退出状态
+        if self.last_noon_check_date != today_str:
+            self.last_noon_check_date = today_str
+            self.noon_early_exit_today = False
+
+        # 仅在 12:00:00 至 13:59:59 期间生效
+        if not (12 <= now.hour < 14):
+            return False
+
+        # 若今日 Matches & Wagers 审查已确认无积压，提早结束
+        if self.noon_early_exit_today:
+            return False
+
+        return True
+
+    def _on_noon_fast_toggle(self):
+        """[午间快速通关开关手动切换回调]"""
+        enabled = self.noon_fast_mode_var.get()
+        if enabled:
+            self.noon_early_exit_today = False  # 用户手动重新打开时重置提前退出状态
+            now = datetime.now()
+            in_window = 12 <= now.hour < 14
+            status_text = "Active now (12-2pm window)" if in_window else "Scheduled (auto active between 12:00-14:00)"
+            self.log(f"[NOON FAST] ⚡ Noon Fast Mode ENABLED — {status_text}")
+        else:
+            self.log("[NOON FAST] ⏸️ Noon Fast Mode DISABLED by user.")
+
 
     def play_error_sound(self):
         """
@@ -614,7 +713,7 @@ class CheckpointTab(ctk.CTkFrame):
         判断用户是否开启了声音报警开关 (sound_alert_var)，
         若开启，派发后台守护线程播放 Windows 原生高频蜂鸣 (1800Hz)，连续蜂鸣 3 声，不卡顿主线程。
         """
-        if not self.sound_alert_var.get():
+        if not self.run_settings["sound"]:
             return
 
         def _beep():
@@ -645,11 +744,12 @@ class CheckpointTab(ctk.CTkFrame):
 
         # 标记停止请求为 True，正在运行的关卡循环在处理完当页后会检测此变量并退出
         self.stop_requested = True
-        self.log("[STOP] ⏹ Stop request received! Halting after current page finishes...")
+        self.update_button_states()
+        self.log("[STOP] ⏹ Pause requested. Current page will finish; click Resume to continue afterwards.")
 
         # 若定时自动调度仍在运行，给予友好提示
         if self.hourly_auto_var.get():
-            self.log("[STOP] Note: Auto schedule remains enabled. Toggle [⏰ Auto Schedule] switch to disable.")
+            self.log("[STOP] Auto schedule will wait while this inspection is paused.")
 
     def update_button_states(self):
         """
@@ -658,7 +758,7 @@ class CheckpointTab(ctk.CTkFrame):
         - 状态 1: 自身巡检正在运行中 (is_running=True) -> 仅 [Stop] 可用，其余全置灰
         - 状态 2: 另一个 Tab (Error Log) 正在运行中 -> 全部置灰 (杜绝浏览器并发竞争)
         - 状态 3: 存在阻断中断点 (last_failed_type 不为空) -> [Resume] 与 [Skip] 亮起，允许重试或跳过
-        - 状态 4: 系统完全空闲 -> [Check All/NIW/Copier] 亮起，[Resume/Skip/Stop] 置灰
+        - 状态 4: 系统完全空闲 -> [Check] 亮起，[Resume/Skip/Stop] 置灰
         """
         def apply():
             # 1. 检测 Error Log 选项卡是否处于活跃运行状态
@@ -669,43 +769,31 @@ class CheckpointTab(ctk.CTkFrame):
             # 2. 状态机条件分支判定
             if self.is_running:
                 # 自身正在巡检中
-                self.btn_run_all.configure(state="disabled")
-                self.btn_run_niw.configure(state="disabled")
-                self.btn_run_copier.configure(state="disabled")
+                self.btn_check.configure(state="disabled")
                 self.btn_resume.configure(state="disabled")
                 self.btn_skip.configure(state="disabled")
-                self.btn_stop.configure(state="normal") # 唯独 Stop 保持可用
-            elif is_error_log_running:
+                self.btn_stop.configure(state="disabled" if self.stop_requested else "normal")
+            elif is_error_log_running or getattr(self.app, "is_logging_in", False) or getattr(self.app, "closing", False):
                 # 另一个 Tab 正在运行，彻底锁定本 Tab 所有执行按钮
-                self.btn_run_all.configure(state="disabled")
-                self.btn_run_niw.configure(state="disabled")
-                self.btn_run_copier.configure(state="disabled")
+                self.btn_check.configure(state="disabled")
                 self.btn_resume.configure(state="disabled")
                 self.btn_skip.configure(state="disabled")
                 self.btn_stop.configure(state="disabled")
-            elif self.last_failed_type is not None:
+            elif self.last_failed_type is not None or self.paused_station is not None:
                 # 存在未处理的中断点（处于待续传/待跳过状态）
-                self.btn_run_all.configure(state="normal")
-                self.btn_run_niw.configure(state="normal")
-                self.btn_run_copier.configure(state="normal")
+                self.btn_check.configure(state="normal")
                 self.btn_resume.configure(state="normal") # 激活 Resume 续传
-                self.btn_skip.configure(state="normal")   # 激活 Skip 强制打勾
+                self.btn_skip.configure(state="normal" if self.last_failed_type is not None else "disabled")
                 self.btn_stop.configure(state="disabled")
             else:
                 # 系统初始或已全部通关的完全空闲状态
-                self.btn_run_all.configure(state="normal")
-                self.btn_run_niw.configure(state="normal")
-                self.btn_run_copier.configure(state="normal")
+                self.btn_check.configure(state="normal")
                 self.btn_resume.configure(state="disabled")
                 self.btn_skip.configure(state="disabled")
                 self.btn_stop.configure(state="disabled")
 
         # 确保在 Tkinter 主事件循环中安全更新 UI 控件
-        self.after(0, apply)
-
-    def toggle_buttons(self, enabled: bool):
-        """兼容旧接口的别名方法，直接统一重定向至 update_button_states"""
-        self.update_button_states()
+        self.app.post_ui(apply)
 
     def reset_buttons(self):
         """
@@ -733,6 +821,9 @@ class CheckpointTab(ctk.CTkFrame):
         [跨 Tab 互斥锁检测]
         检查 Error Log 导出工具是否正在运行。若在运行，拒绝本次巡检请求并打印警告。
         """
+        if getattr(self.app, 'closing', False) or getattr(self.app, 'is_logging_in', False):
+            self.log("[WARN] Browser is busy logging in or the application is closing.")
+            return True
         if hasattr(self.app, 'error_log_tab') and getattr(self.app.error_log_tab, 'is_running', False):
             self.log("[WARN] 🚫 Operation rejected: Error Log Exporter is currently running! Please wait or stop Error Log task.")
             return True
@@ -750,11 +841,31 @@ class CheckpointTab(ctk.CTkFrame):
         if self.is_running or self._check_cross_tab_busy():
             return
 
+        user, pwd = self.app.get_credentials()
+        if not user or not pwd:
+            self.log("[WARN] Account and password are required.")
+            return
+        bypass = self.app.config_data.get("CHECKPOINT_ONLY", {})
+        bypass_pages = set(bypass.get("pages", [])) if bypass.get("enabled", False) else set()
+        self.run_settings = {
+            "credentials": (user, pwd), "url": self.app.get_login_url(),
+            "niw": [v.get() for v in self.niw_vars],
+            "copier": [v.get() for v in self.copier_vars],
+            "noon_fast": self.noon_fast_mode_var.get(),
+            "sound": self.sound_alert_var.get(),
+            "checkpoint_only_niw": [key in bypass_pages for key, _ in STATION_LIST[:15]],
+            "checkpoint_only_copier": [key in bypass_pages for key, _ in STATION_LIST[15:]],
+        }
+        if not any(self.run_settings["niw"]) and not any(self.run_settings["copier"]):
+            self.log("[WARN] Please select at least one checkpoint station below.")
+            return
+        if niw_start == 0 and copier_start == 0 and self.paused_station is None and self.last_failed_type is None:
+            self.run_results = {}
         # 2. 设置运行状态与流水线模式
+        self.paused_station = None
         self.current_pipeline_mode = mode
         self.is_running = True
         self.stop_requested = False
-        self._run_results = []
 
         # 3. 若从该分区起始位置从头执行，重置历史断点记录
         if niw_start in (0, 15) and copier_start == 0:
@@ -781,12 +892,14 @@ class CheckpointTab(ctk.CTkFrame):
         [启动全量贯通巡检子线程]
         流程: NIW 15 关全部执行通过 -> 自动衔接 Copier 9 关执行。
         """
+        if niw_start == 0 and copier_start == 0:
+            self.run_results = {}
         self._start_pipeline_thread(
             mode="FULL",
             niw_start=niw_start,
             copier_start=copier_start,
             full=full,
-            banner_text="Full Checkpoint Started — NIW (15 Stations) → Copier (9 Stations)"
+            banner_text="Checkpoint Started — Selected Stations (NIW → Copier)"
         )
 
     def start_niw_only_thread(self, niw_start=0):
@@ -824,6 +937,21 @@ class CheckpointTab(ctk.CTkFrame):
         if self.is_running or self._check_cross_tab_busy():
             return
 
+        if self.paused_station is not None:
+            section, index = self.paused_station
+            mode = self.current_pipeline_mode
+            self.log(f"[RESUME] Continuing from {section} Station {index + 1}...")
+            self._start_pipeline_thread(
+                mode=mode,
+                niw_start=index if section == "NIW" else 15,
+                copier_start=index if section == "Copier" else 0,
+                full=mode == "FULL",
+                banner_text="Checkpoint Resumed"
+            )
+            return
+        if self.last_failed_type is None:
+            return
+
         is_full = getattr(self, "current_pipeline_mode", "FULL") == "FULL"
 
         if self.last_failed_type == "Copier":
@@ -844,9 +972,13 @@ class CheckpointTab(ctk.CTkFrame):
         if self.is_running or self._check_cross_tab_busy():
             return
 
+        if self.last_failed_type is None:
+            return
+
         self.is_running = True
         self._notify_state_change()
 
+        self.stop_requested = False
         self.log("[SKIP] Force passing current station and moving to next...")
         threading.Thread(target=self.run_skip_and_checkpoint_pipeline, daemon=True).start()
 
@@ -856,9 +988,9 @@ class CheckpointTab(ctk.CTkFrame):
         清空中断指针，打印通关横幅，并将浏览器菜单导航回 NIW 第 1 关 Pending Wager。
         """
         self.last_failed_type = None
+        self.paused_station = None
         self.last_failed_index = 0
         self.log("\n══════════════════════════════════════════════════")
-        self.log("  🎉 Congratulations! All checkpoint stations passed successfully!")
         self.log("══════════════════════════════════════════════════")
         try:
             # 按照运维标准规范，所有关卡巡检完成后，自动将浏览器菜单切回 NIW 第 1 关 Pending Wager 归位
@@ -868,228 +1000,7 @@ class CheckpointTab(ctk.CTkFrame):
         except Exception:
             pass
 
-    def _execute_station_loop(self, section_name: str, checkers: list, page_keys: list, var_list: list, start_idx: int) -> bool:
-        """
-        [关卡分区执行循环引擎]
-        统一执行一个分区内的各站巡检，处理跳过、结果记录、LogViewer 联动刷新、异常中断与用户停止。
-        返回值: interrupted (bool) — 若遇到 Error 或收到用户 Stop 信号则返回 True，否则返回 False。
-        """
-        for i, (name, checker) in enumerate(checkers[start_idx:]):
-            idx = start_idx + i
-
-            # 检测该关卡是否在界面网格中被用户取消打勾
-            if not var_list[idx].get():
-                self.log(f"[SKIP] Skipped {name} (unchecked by user)")
-                continue
-
-            # 执行关卡检查器核心 check 逻辑
-            res = checker.check()
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            # 记录本关巡检结果
-            self._run_results.append((page_keys[idx], name, res, ts))
-
-            # 实时通知第 3 个 Tab (LogViewerTab) 刷新列表状态
-            if hasattr(self.app, 'log_viewer_tab'):
-                self.after(0, self.app.log_viewer_tab.refresh_list)
-
-            # 检查结果是否发生错误 (res 为 False)
-            if not res:
-                self.last_failed_type = section_name
-                self.last_failed_index = idx
-                self.log(f"\n[INTERRUPT] ❌ {name} error detected, inspection halted!")
-                self.log("  → Click [Resume] to retry current station")
-                self.log("  → Click [Skip] to force pass current station and proceed")
-                self.play_error_sound()
-                return True # 中断当前流水线，等待用户介入
-
-            # 检测用户是否点击了 Stop 停止按钮
-            if self.stop_requested:
-                self.log(f"\n[STOP] ⏹ Completed {name}. Stopping pipeline per user request.")
-                return True
-
-        return False
 
     # ─────────────────────────────────────────────────────────────────
     #  流水线调度核心逻辑 (Pipeline Execution Engine)
     # ─────────────────────────────────────────────────────────────────
-    def run_full_pipeline(self, niw_start=0, copier_start=0, full=True):
-        """
-        [核心流水线主调度器 (后台工作线程)]
-        参数:
-        - niw_start: NIW 起始关卡索引 (0~14，默认 0；为 15 表示跳过 NIW)
-        - copier_start: Copier 起始关卡索引 (0~8，默认 0)
-        - full: 是否为贯通模式 (True 表示 NIW 跑完后继续跑 Copier)
-        """
-        try:
-            # 1. 获取当前主界面顶栏填写的账号、密码与登录域名
-            user, pwd = self.app.get_credentials()
-            url = self.app.get_login_url()
-            self.log(f"[CONFIG] User: {user}  |  URL: {url}")
-
-            # 2. 连接或启动底层 Chrome WebDriver 驱动
-            self.log("[BROWSER] Connecting to Chrome browser...")
-            driver = BrowserManager.get_driver(url=url, user=user, pwd=pwd)
-            self.log("[BROWSER] Browser ready!")
-            self.log("──────────────────────────────────────────────────")
-
-            # 3. 构造 15 个 NIW 关卡实例序列与标准存储键列表
-            niw_page_keys = [f"niw_{str(i+1).zfill(2)}" for i in range(15)]
-            niw_checkers = [
-                ("NIW Station 01 - Pending Wager",     PendingWagerChecker(driver, self.log)),
-                ("NIW Station 02 - CCL Recover",        CCLRecoverChecker(driver, self.log)),
-                ("NIW Station 03 - Matches Wagers",     MatchesWagersChecker(driver, self.log)),
-                ("NIW Station 04 - Result Process",     ResultProcessChecker(driver, self.log)),
-                ("NIW Station 05 - Calculate Betslips", CalculateBetslipsChecker(driver, self.log)),
-                ("NIW Station 06 - RPT PolyMarket",     RPTPolyMarketChecker(driver, self.log)),
-                ("NIW Station 07 - RPT Compare",        RPTCompareChecker(driver, self.log)),
-                ("NIW Station 08 - RPT AI",             RPTAIChecker(driver, self.log)),
-                ("NIW Station 09 - RPT Compare UTC",    RPTCompareUTCChecker(driver, self.log)),
-                ("NIW Station 10 - Forecast",           ForecastChecker(driver, self.log)),
-                ("NIW Station 11 - Check CCL",          CheckCCLChecker(driver, self.log)),
-                ("NIW Station 12 - Wsum Sport",         WsumSportChecker(driver, self.log)),
-                ("NIW Station 13 - HG Percentages",     HGPercentagesChecker(driver, self.log)),
-                ("NIW Station 14 - RPT CRS",            RPTCRSChecker(driver, self.log)),
-                ("NIW Station 15 - 1 Wallet Pending",   OneWalletPendingChecker(driver, self.log)),
-            ]
-
-            # 4. 构造 9 个 Copier 关卡实例序列与标准存储键列表
-            copier_page_keys = [f"copier_{str(i+1).zfill(2)}" for i in range(9)]
-            copier_checkers = [
-                ("Copier Station 01 - Copier",            CopierChecker(driver, self.log)),
-                ("Copier Station 02 - DB Server Status",   DBServerStatusChecker(driver, self.log)),
-                ("Copier Station 03 - AP Server Status",   APServerStatusChecker(driver, self.log)),
-                ("Copier Station 04 - Check AP Space",     CheckAPSpaceChecker(driver, self.log)),
-                ("Copier Station 05 - Error Log",          ErrorLogChecker(driver, self.log)),
-                ("Copier Station 06 - Redis Server",       RedisServerChecker(driver, self.log)),
-                ("Copier Station 07 - Robot Monitor",      RobotMonitorChecker(driver, self.log)),
-                ("Copier Station 08 - NIW Robot Monitor",  NIWRobotMonitorChecker(driver, self.log)),
-                ("Copier Station 09 - Info Robot Monitor", InfoRobotMonitorChecker(driver, self.log)),
-            ]
-
-            interrupted = False # 中断标志位
-
-            # ── 5. 执行 NIW 业务分区循环 ──
-            if niw_start < 15:
-                self.log(f"[PIPELINE START] NIW Section — Starting from Station {niw_start+1}")
-                interrupted = self._execute_station_loop("NIW", niw_checkers, niw_page_keys, self.niw_vars, niw_start)
-
-            # ── 6. 执行 Copier & Server 基础设施分区循环 ──
-            should_run_copier = (full or copier_start > 0 or getattr(self, "current_pipeline_mode", "FULL") in ["FULL", "COPIER"])
-            if not interrupted and should_run_copier:
-                self.log("──────────────────────────────────────────────────")
-                self.log(f"[PIPELINE START] Copier & Server Section — Starting from Station {copier_start+1}")
-                interrupted = self._execute_station_loop("Copier", copier_checkers, copier_page_keys, self.copier_vars, copier_start)
-                if not interrupted:
-                    self.log("[COMPLETE] All Copier & Server stations completed!")
-            elif not interrupted and not should_run_copier and niw_start < 15:
-                self.log("[COMPLETE] All NIW stations completed!")
-
-            # ── 7. 全量通关后的善后与归位逻辑 ──
-            if not interrupted:
-                self._handle_all_passed(driver)
-
-            # 最终刷新一次日志浏览器
-            if hasattr(self.app, 'log_viewer_tab'):
-                self.after(0, self.app.log_viewer_tab.refresh_list)
-
-        except Exception as e:
-            # 捕获致命未处理异常，输出详细堆栈并触发报警音
-            self.log(f"\n[ERROR] Pipeline encountered an exception: {e}\n{traceback.format_exc()}")
-            self.play_error_sound()
-        finally:
-            # 退出工作线程时重置所有操作按钮状态
-            self.after(0, self.reset_buttons)
-
-    def run_skip_and_checkpoint_pipeline(self):
-        """
-        [强制跳过打勾执行体]
-        在当前停留的阻断异常页面上：
-        1. 强制找到 Checkpoint 按钮并点击打勾。
-        2. 将内存 CheckpointStore 中该关卡的状态维持为 False (Error)，附加 [Skipped & Checked] 标识。
-        3. 刷新日志浏览器。
-        4. 自动拉起下一关卡继续向下执行流水线。
-        """
-        _continuing_to_next = False
-        try:
-            driver = BrowserManager.get_driver()
-            checker = BaseChecker(driver, self.log)
-
-            # 1. 强行在当前页面点击 Checkpoint 打勾
-            self.log("[SKIP] Forcing Checkpoint click on current page...")
-            checker.click_checkpoint()
-            self.log("[SKIP SUCCESS] Checkpoint checked! Preparing next station...")
-
-            # 2. 标记当前关卡虽被跳过并强制点击 Checkpoint 打勾，但在 CheckpointStore 中维持 Error 异常状态（用户要求：被 skip 跳过的关卡不要改成 passed，维持 error 状态）
-            curr_pk = f"copier_{str(self.last_failed_index + 1).zfill(2)}" if self.last_failed_type == "Copier" else f"niw_{str(self.last_failed_index + 1).zfill(2)}"
-            curr_data = CheckpointStore.get(curr_pk)
-            if curr_data:
-                orig_summary = curr_data.get("summary", "")
-                CheckpointStore.save(
-                    page_key=curr_pk,
-                    title=curr_data.get("title", ""),
-                    status=False,
-                    tables=curr_data.get("tables", []),
-                    headers=curr_data.get("headers", []),
-                    rows=curr_data.get("rows", []),
-                    summary=f"[Skipped & Checked] {orig_summary}" if orig_summary else "Skipped & Checked by user"
-                )
-            else:
-                title = f"{self.last_failed_type} Station {self.last_failed_index + 1}"
-                CheckpointStore.save(
-                    page_key=curr_pk,
-                    title=title,
-                    status=False,
-                    summary="[Skipped & Checked] Station skipped by user after error"
-                )
-
-            # 3. 刷新列表展示
-            if hasattr(self.app, 'log_viewer_tab'):
-                self.after(0, self.app.log_viewer_tab.refresh_list)
-
-            # 4. 计算下一关卡索引
-            next_index = self.last_failed_index + 1
-            is_full = getattr(self, "current_pipeline_mode", "FULL") == "FULL"
-
-            # 5. 分支推进逻辑
-            if self.last_failed_type == "Copier":
-                if next_index < 9:
-                    # Copier 还有后续关卡
-                    _continuing_to_next = True
-                    self.log(f"[SKIP] Proceeding from Copier Station {next_index + 1}...")
-                    self.run_full_pipeline(niw_start=15, copier_start=next_index, full=False)
-                else:
-                    # Copier 最后一关已跳过，全量完成
-                    self.log("[COMPLETE] All Copier & Server stations completed!")
-                    self._handle_all_passed(driver)
-                    if hasattr(self.app, 'log_viewer_tab'):
-                        self.after(0, self.app.log_viewer_tab.refresh_list)
-            else:
-                # 中断在 NIW 关卡
-                if next_index < 15:
-                    # NIW 还有后续关卡
-                    _continuing_to_next = True
-                    self.log(f"[SKIP] Proceeding from NIW Station {next_index + 1}...")
-                    self.run_full_pipeline(niw_start=next_index, copier_start=0, full=is_full)
-                else:
-                    # NIW 15 关全部结束
-                    if is_full:
-                        # 全量模式下自动切入 Copier 第 1 关
-                        _continuing_to_next = True
-                        self.log("[SKIP] NIW section completed! Continuing to Copier & Server...")
-                        self.run_full_pipeline(niw_start=15, copier_start=0, full=True)
-                    else:
-                        # 仅 NIW 模式结束
-                        self.log("[COMPLETE] All NIW stations completed!")
-                        self._handle_all_passed(driver)
-                        if hasattr(self.app, 'log_viewer_tab'):
-                            self.after(0, self.app.log_viewer_tab.refresh_list)
-
-        except Exception as e:
-            self.log(f"[ERROR] Force skip encountered exception: {e}\n{traceback.format_exc()}")
-        finally:
-            # 若没有后续关卡推进，重置按钮状态
-            if not _continuing_to_next:
-                self.after(0, self.reset_buttons)
-
-

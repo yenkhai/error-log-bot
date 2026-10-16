@@ -5,7 +5,7 @@
 【核心功能详解与学习指南】
 1. 页面功能与抓取目标:
    - 本页面监控 HG 占比及编辑器/投注同步状态。
-   - 抓取字段: Company (公司代码如 s0010, k0002), Count (Editor) (编辑器计数), 
+   - 抓取字段: Company (公司代码如 s0010, k0002), Count (Editor) (编辑器计数),
      Editor (编辑器状态), Count (Betting) (投注计数), Betting (投注状态)。
 
 2. 校验与阻断标准 (Tier 1 强阻断):
@@ -35,14 +35,14 @@ class HGPercentagesChecker(BaseChecker):
         5. 巡检通过后点击关卡 Checkpoint 按钮
         """
         # [步骤 1] 打印站头，传入 Target Menu ID: apy_b0i15text (对应 NIW 区域的 HG Percentages 选项)
-        self.log_station_header("第13站 HG Percentages", menu_id="apy_b0i15text")
+        self.log_station_header("第14站 HG Percentages", menu_id="apy_b0i16text")
         try:
             # [步骤 2] 导航切入 HG Percentages 页面
-            self.navigate_to_menu("HG Percentages", menu_id="apy_b0i15text", section="NIW")
+            self.navigate_to_menu("HG Percentages", menu_id="apy_b0i16text", section="NIW")
 
             # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=1.5, max_wait=35)
-            
+
             # [步骤 3] JavaScript 脚本精准抓取 HG Percentages 表格数据
             p13_data = self.driver.execute_script("""
                 // 1. 初始化前端抓取结果字典
@@ -83,18 +83,20 @@ class HGPercentagesChecker(BaseChecker):
                                 // 过滤表头行
                                 if (com && com !== "Company" && com.indexOf("Count") === -1) {
                                     // 4. 只要 Editor 或 Betting 有任何一个不是 Correct 即判定为异常
-                                    var isErr = editor.toLowerCase() !== "correct" || betting.toLowerCase() !== "correct";
+                                    var editorCount = Number(cEditor.replace(/,/g, ""));
+                                    var bettingCount = Number(cBetting.replace(/,/g, ""));
+                                    var isErr = editorCount > 0 || bettingCount > 0 || editor.toLowerCase() !== "correct" || betting.toLowerCase() !== "correct";
                                     var tag = " [OK/正常绿字]";
                                     if (isErr) {
                                         result.errCount++;
                                         tag = " [ERROR/Tier 1 异常阻断]";
-                                        result.errList.push(com + " Editor: " + editor + ", Betting: " + betting);
+                                        result.errList.push(com + " Count(Editor): " + cEditor + ", Editor: " + editor + ", Count(Betting): " + cBetting + ", Betting: " + betting);
                                     }
 
                                     // 5. 格式化日志输出字符串
                                     var line = com + ": Count(Editor) = " + cEditor + ", Editor = " + editor + ", Count(Betting) = " + cBetting + ", Betting = " + betting + tag;
                                     result.rows.push(line);
-                                    
+
                                     // 6. 存入结构化数据列表供仪表盘展示
                                     result.rawRows.push({
                                         company: com,
@@ -121,8 +123,11 @@ class HGPercentagesChecker(BaseChecker):
             err_count = p13_data.get("errCount", 0)
             err_list = p13_data.get("errList", [])
 
+            if not raw_rows:
+                raise RuntimeError("HG Percentages 未读取到公司数据，不能判定通过")
+
             self.log_data_extracted(f"成功抓取 HG Percentages ({cat_name}) 数据 | 监控节点: {len(rows)} 项 (异常 {err_count} 项)")
-            self.log_check_method("全量校验 HG Percentages 所有公司节点的 Editor 与 Betting 必须为 Correct (Tier 1 强阻断)")
+            self.log_check_method("全量校验 HG Percentages 所有公司节点的 两项 Count 必须为 0，Editor 与 Betting 必须为 Correct (Tier 1 强阻断)")
 
             # [步骤 4] 无条件全量明细打印 (生成完整的文本格式巡检报告)
             summary_lines = [f"【HG Percentages 全量巡检数据明细 ({cat_name})】:"]
@@ -137,9 +142,9 @@ class HGPercentagesChecker(BaseChecker):
             table_rows = [
                 [
                     CheckpointStore.make_cell(r["company"]),
-                    CheckpointStore.make_cell(r["c_editor"]),
+                    CheckpointStore.make_cell(r["c_editor"], bg="red" if float(r["c_editor"].replace(",", "") or 0) > 0 else "green"),
                     CheckpointStore.make_cell(r["editor"], bg="red" if r.get("is_error") and r["editor"].lower() != "correct" else "green"),
-                    CheckpointStore.make_cell(r["c_betting"]),
+                    CheckpointStore.make_cell(r["c_betting"], bg="red" if float(r["c_betting"].replace(",", "") or 0) > 0 else "green"),
                     CheckpointStore.make_cell(r["betting"], bg="red" if r.get("is_error") and r["betting"].lower() != "correct" else "green"),
                     CheckpointStore.make_cell(r["status"], bg="red" if r.get("is_error") else "green")
                 ]
@@ -149,9 +154,10 @@ class HGPercentagesChecker(BaseChecker):
             # [步骤 5] Tier 1 报错阻断判定
             # 只要存在 Editor 或 Betting 非 Correct，阻断 Checkpoint
             if err_count > 0:
-                self.log_check_result(False, f"HG Percentages 巡检发现 Tier 1 致命异常: 存在 {err_count} 项节点状态非 Correct ({', '.join(err_list)})，强阻断 Checkpoint！")
+                self.log_check_result(False, f"HG Percentages 巡检发现 Tier 1 致命异常: 存在 {err_count} 项节点 Count >0 或状态非 Correct ({', '.join(err_list)})，强阻断 Checkpoint！")
                 CheckpointStore.save(
-                    page_key="niw_13",
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
+                    page_key="niw_14",
                     title="HG Percentages",
                     status=False,
                     headers=table_headers,
@@ -160,12 +166,14 @@ class HGPercentagesChecker(BaseChecker):
                 )
                 return False
             else:
-                self.log_check_result(True, "HG Percentages 全部公司节点 Editor 与 Betting 均为 Correct，状态完全正常！")
+                self.log_check_result(True, "HG Percentages 全部公司节点 两项 Count 均为 0，Editor 与 Betting 均为 Correct，状态完全正常！")
 
             # [步骤 6] 解封并自动点击 Checkpoint
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
-                page_key="niw_13",
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
+                page_key="niw_14",
                 title="HG Percentages",
                 status=True,
                 headers=table_headers,
@@ -176,4 +184,4 @@ class HGPercentagesChecker(BaseChecker):
 
         except Exception as e:
             # 捕获未知异常并自动记录 CheckpointStore
-            return self.handle_exception("niw_13", "HG Percentages", e)
+            return self.handle_exception("niw_14", "HG Percentages", e)

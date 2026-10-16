@@ -47,10 +47,10 @@ class DBServerStatusChecker(BaseChecker):
         try:
             # [步骤 1] 导航切入 DB Server Status 页面 (section="Copier" 切换 Copier & Server 选项卡)
             self.navigate_to_menu("DB Server Status", menu_id="apy_b0i20text", section="Copier")
-            
+
             # 智能等待页面数据加载完毕
             self.wait_for_page_loaded(seconds=2, max_wait=30)
-            
+
             # [步骤 2] 使用 JavaScript 精准解析 mainFrame 内的 DB 服务器节点表格
             # 表格列顺序: No. | Host | Remarks | Th_connected | ratio | Partition Event | Function | Company | Product
             db_data = self.driver.execute_script("""
@@ -140,7 +140,7 @@ class DBServerStatusChecker(BaseChecker):
 
             # [步骤 4] scan_red_cells() 全页红底/红字深度扫描
             red_items = self.scan_red_cells()
-            
+
             headers = ["No.", "Host", "Remarks", "Th_connected", "ratio", "Partition Event", "Function"]
             rows = []
             for srv in servers:
@@ -162,7 +162,7 @@ class DBServerStatusChecker(BaseChecker):
                 self.log(f"[Error] DB Server Status 检测到 {len(red_items)} 个红色异常节点，触发 Tier 1 致命阻断！")
                 for item in red_items:
                     self.log(f"   [RED NODE] {item}")
-                
+
                 msg = f"DB Server Status 存在 {len(red_items)} 个红色异常节点，Tier 1 强阻断 Checkpoint！"
                 self.log_check_result(False, msg)
                 CheckpointStore.save(
@@ -187,7 +187,8 @@ class DBServerStatusChecker(BaseChecker):
                 summary=msg
             )
             # [步骤 5] 巡检通过，点击 Checkpoint
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             return True
 
         except Exception as e:

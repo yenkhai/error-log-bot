@@ -2,7 +2,7 @@
 ================================================================================
 第1站 Pending Wager 关卡检查器 (pages/niw/page_01_pending_wager.py)
 --------------------------------------------------------------------------------
-作用: 
+作用:
 1. 导航至 Pending Wager 页面 (Menu ID: apy_b0i2text)。
 2. 自动载入数据缓冲（无需重复点击 Search 按钮）。
 3. 提取全表所有 Satellite 卫星公司（RCM & LRCM）的:
@@ -48,14 +48,14 @@ class PendingWagerChecker(BaseChecker):
                             // 转为整型数字，转换失败则默认为 0
                             var WagerCnt = parseInt(WagerCountText) || 0; // Wager 积压整型数量
                             var mulpCnt = parseInt(mulpCountText) || 0;   // Mulp 积压整型数量
-                            
+
                             // Boolean 判定是否有异常：任一单数 > 0 即为异常(true)
                             var isErr = (WagerCnt > 0 || mulpCnt > 0);
 
                             // 组装格式化日志明细行
                             var detailStr = name + ": total wager pending: " + WagerCnt + ", Total Mulp pending: " + mulpCnt;
                             allCompanyDetails.push(detailStr + (isErr ? "status: [ERROR]" : "status: [OK]"));
-                            
+
                             // 保存到 rawRows 结构化数组
                             rawRows.push({
                                 company: name,
@@ -73,11 +73,11 @@ class PendingWagerChecker(BaseChecker):
                 }
 
                 // 将抓取到的全量数据打包返回给 Python 侧
-                return { 
-                    allCompanyDetails: allCompanyDetails, 
-                    errorCompanyDetails: errorCompanyDetails, 
+                return {
+                    allCompanyDetails: allCompanyDetails,
+                    errorCompanyDetails: errorCompanyDetails,
                     rawRows: rawRows,
-                    linkCount: links.length 
+                    linkCount: links.length
                 };
             """)
 
@@ -98,8 +98,8 @@ class PendingWagerChecker(BaseChecker):
             table_rows = [
                 [
                     CheckpointStore.make_cell(r["company"]),
-                    CheckpointStore.make_cell(str(r["wager"])),
-                    CheckpointStore.make_cell(str(r["mulp"])),
+                    CheckpointStore.make_cell(str(r["wager"]), bg="red" if r["wager"] > 0 else "green"),
+                    CheckpointStore.make_cell(str(r["mulp"]), bg="red" if r["mulp"] > 0 else "green"),
                     CheckpointStore.make_cell(r["status"])
                 ]
                 for r in raw_rows
@@ -112,9 +112,10 @@ class PendingWagerChecker(BaseChecker):
                 for item in error_company_details:
                     self.log(f"  - {item}")
                 self.log_check_result(False, "Pending Wager [Error]")
-                
+
                 # 保存 Checkpoint 状态为失败 (False)
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                     page_key="niw_01",
                     title="Pending Wager",
                     status=False,
@@ -127,10 +128,12 @@ class PendingWagerChecker(BaseChecker):
                 self.log_check_result(True, f"Pending Wager 巡检通过，全表 {link_count} 家公司")
 
             # 7. 无异常时，精准点击页面上的 Checkpoint 按钮提交保存 (<input id="checkpoint" onclick="setCP();">)
-            self.click_checkpoint()
-            
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
+
             # 保存 Checkpoint 状态为成功 (True)
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                 page_key="niw_01",
                 title="Pending Wager",
                 status=True,
@@ -143,4 +146,3 @@ class PendingWagerChecker(BaseChecker):
         except Exception as e:
             # 捕获运行中的未知异常并自动记录 CheckpointStore
             return self.handle_exception("niw_01", "Pending Wager", e)
-

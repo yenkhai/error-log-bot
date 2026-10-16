@@ -20,6 +20,7 @@
 
 # 导入 Python 原生多线程模块，用于异步启动仅登录等网络 IO 耗时任务，防止卡死 GUI 主事件循环
 import threading
+import queue
 
 # 导入 CustomTkinter 现代 GUI 控件库 (基于 Tkinter 深度二次封装，原生支持圆角与暗黑主题)
 import customtkinter as ctk
@@ -58,6 +59,12 @@ class UnifiedBotApp(ctk.CTk):
 
         # 4. 设置窗口允许缩放的最小边界值 (防止视窗被缩得过小导致控件挤压重叠)
         self.minsize(980, 680)
+
+        # 5. 全局登录中互斥状态标志位
+        self.closing = False
+        self._ui_queue = queue.Queue()
+        self.after(30, self._drain_ui_queue)
+        self.is_logging_in = False
 
         # 5. 设定全局 UI 主题模式为深色模式 ("Dark")
         ctk.set_appearance_mode("Dark")
@@ -240,9 +247,11 @@ class UnifiedBotApp(ctk.CTk):
         new_url = self.entry_url.get().strip()
         if new_url:
             # 1. 更新内存配置字典
-            self.config_data["LOGIN_URL"] = new_url
-            # 2. 调用 config.py 写入本地磁盘 JSON 文件
-            save_config(self.config_data)
+            updated = {**self.config_data, "LOGIN_URL": new_url}
+            if not save_config(updated):
+                self.lbl_login_status.configure(text="❌ 保存失败，请检查目录写入权限", text_color="#FF4C4C")
+                return
+            self.config_data = updated
             # 3. 界面视觉反馈：临时将按钮变更为已保存并在 1.5 秒后还原
             if hasattr(self, 'btn_save_url'):
                 orig_text = self.btn_save_url.cget("text")
@@ -278,28 +287,48 @@ class UnifiedBotApp(ctk.CTk):
             self.entry_user.delete(0, "end")
             self.entry_pass.delete(0, "end")
 
+    def post_ui(self, callback, *args):
+        """Workers enqueue callbacks without touching Tk."""
+        self._ui_queue.put((callback, args))
+
+    def _drain_ui_queue(self):
+        for _ in range(200):
+            try:
+                callback, args = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback(*args)
+            except Exception:
+                import traceback
+                traceback.print_exc()
+        self.after(30, self._drain_ui_queue)
+
     def on_close(self):
-        """
-        [主窗口关闭安全拦截 (WM_DELETE_WINDOW)]
-        当用户点击操作系统右上角红叉关闭窗口时触发：
-        通知所有正在运行的后台子线程优雅停机并释放资源，随后安全销毁窗口。
-        """
-        try:
-            # 1. 若 CheckpointTab 正在运行，向其注入停止信号并取消心跳定时器
-            if hasattr(self, 'checkpoint_tab'):
-                self.checkpoint_tab.stop_requested = True
-                # 取消定时自动巡检的 1 秒心跳递归定时器，防止窗口销毁后触发 TclError
-                if getattr(self.checkpoint_tab, 'hourly_timer_id', None) is not None:
-                    self.checkpoint_tab.after_cancel(self.checkpoint_tab.hourly_timer_id)
-                    self.checkpoint_tab.hourly_timer_id = None
+        if self.closing:
+            return
+        self.closing = True
+        self.lbl_login_status.configure(text="Stopping tasks safely...", text_color="#FFCC00")
+        self.checkpoint_tab.hourly_auto_var.set(False)
+        self.checkpoint_tab.stop_requested = True
+        if self.checkpoint_tab.hourly_timer_id is not None:
+            self.checkpoint_tab.after_cancel(self.checkpoint_tab.hourly_timer_id)
+            self.checkpoint_tab.hourly_timer_id = None
+        if self.error_log_tab.service:
+            self.error_log_tab.service.stop_flag = True
+        self.notify_task_state_changed()
+        self._wait_for_shutdown()
 
-            # 2. 若 ErrorLogTab 正在抓取，向其底层的 Scraper 服务注入 stop_flag 停止信号
-            if hasattr(self, 'error_log_tab') and getattr(self.error_log_tab, 'service', None):
-                self.error_log_tab.service.stop_flag = True
-        except Exception:
-            pass # 即使在异常情况下也不阻碍视窗的正常退出
-
-        # 3. 彻底注销并销毁 Tkinter 主窗口
+    def _wait_for_shutdown(self):
+        if self.is_any_task_running:
+            self.after(100, self._wait_for_shutdown)
+            return
+        if not hasattr(self, '_browser_cleanup'):
+            self._browser_cleanup = threading.Thread(target=BrowserManager.quit_driver, daemon=True)
+            self._browser_cleanup.start()
+        if self._browser_cleanup.is_alive():
+            self.after(100, self._wait_for_shutdown)
+            return
         self.destroy()
 
     def get_credentials(self):
@@ -321,34 +350,29 @@ class UnifiedBotApp(ctk.CTk):
     def is_any_task_running(self) -> bool:
         """
         [全局任务活跃度探测属性]
-        检查 Checkpoint 选项卡或 Error Log 选项卡是否有任一后台线程正在运行。
+        检查 Checkpoint 选项卡、Error Log 选项卡或正在执行仅登录中是否有任一任务进行。
         """
         is_cp = hasattr(self, 'checkpoint_tab') and getattr(self.checkpoint_tab, 'is_running', False)
         is_el = hasattr(self, 'error_log_tab') and getattr(self.error_log_tab, 'is_running', False)
-        return is_cp or is_el
+        is_log = getattr(self, 'is_logging_in', False)
+        return is_cp or is_el or is_log
 
     def notify_task_state_changed(self):
         """
         [全局任务互斥总调度中心]
-        业务背景: 
+        业务背景:
         底层 Chrome WebDriver 属于单例独占式浏览器实例，
         若 Checkpoint 巡检与 Error Log 导出同时运行，会导致页面疯狂互相跳转、Session 错乱崩溃。
-        因此通过本中心，当任意 Tab 任务状态变更时，统一刷新所有相关按钮的启用/禁用状态：
-        - 巡检中: 禁用 Error Log [RUN]、禁用 [Login Only]
-        - 导出中: 禁用 Checkpoint 所有巡检按钮、禁用 [Login Only]
-        - 均空闲: 全部解除锁定
+        安全设计: 内部统一通过 self.post_ui(...) 派发回主事件循环，杜绝子线程直接操作 UI 组件。
         """
-        # 1. 通知 Checkpoint 选项卡刷新自身按钮状态
-        if hasattr(self, 'checkpoint_tab'):
-            self.checkpoint_tab.update_button_states()
-
-        # 2. 通知 Error Log 选项卡刷新自身按钮状态
-        if hasattr(self, 'error_log_tab'):
-            self.error_log_tab.update_button_states()
-
-        # 3. 同步切换 [Login Only] 按钮状态（基于全局任务活跃度统一判断）
-        if hasattr(self, 'btn_login_only'):
-            self.btn_login_only.configure(state="disabled" if self.is_any_task_running else "normal")
+        def _apply():
+            if hasattr(self, 'checkpoint_tab'):
+                self.checkpoint_tab.update_button_states()
+            if hasattr(self, 'error_log_tab'):
+                self.error_log_tab.update_button_states()
+            if hasattr(self, 'btn_login_only'):
+                self.btn_login_only.configure(state="disabled" if self.is_any_task_running else "normal")
+        self.post_ui(_apply)
 
     def do_login_only(self):
         """
@@ -365,11 +389,13 @@ class UnifiedBotApp(ctk.CTk):
             return
 
         # 3. 检查是否有后台任务正在执行
-        if self.is_any_task_running:
+        if self.closing or self.is_any_task_running:
             self.lbl_login_status.configure(text="⚠️ Task currently running!", text_color="#FFCC00")
             return
 
-        # 4. 将按钮置灰防止重复狂点，并显示等待状态
+        # 4. 标记登录状态并全局锁定按钮
+        self.is_logging_in = True
+        self.notify_task_state_changed()
         self.btn_login_only.configure(state="disabled", text="⏳ Logging in...")
         self.lbl_login_status.configure(text="Connecting to browser...", text_color="#17a2b8")
 
@@ -387,21 +413,19 @@ class UnifiedBotApp(ctk.CTk):
                     self.checkpoint_tab.log(f"[LOGIN ONLY] ✅ Successfully logged in as '{user}'! (No inspection triggered)")
 
                 # 登录成功回调：更新 UI 标签
-                self.after(0, lambda: self.lbl_login_status.configure(text="✅ Logged in!", text_color="#28a745"))
+                self.post_ui(lambda: self.lbl_login_status.configure(text="✅ Logged in!", text_color="#28a745"))
             except Exception as e:
                 err_msg = str(e)
                 if hasattr(self, 'checkpoint_tab'):
                     self.checkpoint_tab.log(f"[LOGIN ONLY] ❌ Login failed: {err_msg}")
 
                 # 登录失败回调：更新失败提示红字
-                self.after(0, lambda: self.lbl_login_status.configure(text="❌ Login failed", text_color="#FF4C4C"))
+                self.post_ui(lambda: self.lbl_login_status.configure(text="❌ Login failed", text_color="#FF4C4C"))
             finally:
-                # 统一在主线程恢复按钮可用状态
-                self.after(0, lambda: self.btn_login_only.configure(
-                    state="disabled" if self.is_any_task_running else "normal",
-                    text="Login"
-                ))
+                # 释放登录锁定状态，刷新全局互斥按钮
+                self.is_logging_in = False
+                self.notify_task_state_changed()
+                self.post_ui(lambda: self.btn_login_only.configure(text="Login"))
 
         # 6. 启动后台守护线程运行 worker
         threading.Thread(target=_worker, daemon=True).start()
-

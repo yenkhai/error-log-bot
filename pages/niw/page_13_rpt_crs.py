@@ -22,6 +22,7 @@
 import time
 from core.base_checker import BaseChecker
 from core.checkpoint_store import CheckpointStore
+from core.native_tables import capture_native_tables, prefer_native_tables
 
 class RPTCRSChecker(BaseChecker):
     """
@@ -40,10 +41,10 @@ class RPTCRSChecker(BaseChecker):
         5. 校验通过后点击关卡 Checkpoint 按钮
         """
         # [步骤 1] 打印站名日志头，传入 Menu ID 与页面键
-        self.log_station_header("第14站 RPT CRS", menu_id="apy_b0i16text", page_key="niw_14")
+        self.log_station_header("第13站 RPT CRS", menu_id="apy_b0i15text", page_key="niw_13")
         try:
             # 1. 导航切入 RPT CRS 页面 (基础初始导航 3 秒)
-            self.navigate_to_menu("RPT CRS", menu_id="apy_b0i16text", section="NIW")
+            self.navigate_to_menu("RPT CRS", menu_id="apy_b0i15text", section="NIW")
 
             # 2. 智能动态轮询：等待所有表格中每个区间的 AJAX 状态数据完全渲染填充完毕
             max_poll_seconds = 60
@@ -234,18 +235,31 @@ class RPTCRSChecker(BaseChecker):
                 [CheckpointStore.make_cell(r)] for r in all_rows
             ]
 
+            # The native CRS table has Agency rowspans and API/Credit colspans.
+            # Preserve website colors; a white '-' is not a green status cell.
+            native_tables = []
+            try:
+                captured = capture_native_tables(self.driver, "crs")
+                if captured and any(table.get('rows') for table in captured):
+                    native_tables = captured
+            except Exception as exc:
+                self.log(f"[WARN] CRS 原表提取失败：{type(exc).__name__}: {exc}")
+            if not native_tables:
+                self.log("[WARN] CRS 未捕获到 Agency / API / Credit 原表，当前使用兼容显示。")
+
             # 5. Checkpoint 巡检结论判定
             if tier1_errors > 0:
                 if unloaded_cnt > 0:
                     self.log(f"[Error] RPT CRS 检测到 {unloaded_cnt} 项数据尚未加载完成，属于 Tier 1 致命异常，严禁放水，阻断 Checkpoint！")
                 if (tier1_errors - unloaded_cnt) > 0:
                     self.log(f"[Error] RPT CRS 检测到 {tier1_errors - unloaded_cnt} 项节点状态为 error/红字异常，阻断 Checkpoint！")
-                
+
                 self.log_check_result(False, f"RPT CRS 存在 {tier1_errors} 项 Tier 1 异常 ({', '.join(err_list[:3])})，阻断 Checkpoint。")
                 CheckpointStore.save(
-                    page_key="niw_14",
+                    page_key="niw_13",
                     title="RPT CRS",
                     status=False,
+                    tables=native_tables or None,
                     headers=table_headers,
                     rows=table_rows,
                     summary=f"Tier 1 errors: {tier1_errors}, Unloaded: {unloaded_cnt}"
@@ -255,11 +269,13 @@ class RPTCRSChecker(BaseChecker):
                 self.log_check_result(True, "RPT CRS 全部区间节点数据 100% 加载完毕且同步状态完全正常！")
 
             # 6. 巡检通过，点击 Checkpoint 提交通关
-            self.click_checkpoint()
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
             CheckpointStore.save(
-                page_key="niw_14",
+                page_key="niw_13",
                 title="RPT CRS",
                 status=True,
+                tables=native_tables or None,
                 headers=table_headers,
                 rows=table_rows,
                 summary=f"全部 {len(matrix_rows)} 个核算节点全部正常"
@@ -268,4 +284,4 @@ class RPTCRSChecker(BaseChecker):
 
         except Exception as e:
             # 捕获未知异常并自动记录 CheckpointStore
-            return self.handle_exception("niw_14", "RPT CRS", e)
+            return self.handle_exception("niw_13", "RPT CRS", e)

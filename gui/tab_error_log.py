@@ -77,8 +77,8 @@ class ErrorLogTab(ctk.CTkFrame):
             ctrl_frame,
             text="[STOP] Stop",
             command=self.stop_scrape,
-            fg_color="#DC3545",       # 鲜明红色
-            hover_color="#C82333",    # 鼠标悬停暗红色
+            fg_color="#c0392b",       # 与 CheckpointTab 统一的典雅红
+            hover_color="#962d22",    # 鼠标悬停暗红色
             state="disabled",         # 初始禁用
             font=ctk.CTkFont(weight="bold"),
             width=80
@@ -95,8 +95,7 @@ class ErrorLogTab(ctk.CTkFrame):
         )
         self.btn_clear.pack(side="right", padx=10, pady=5)
 
-        # ── 2. 中部双日志面板 (Dual Log Terminals) ──
-        # 创建中间主容器，采用 Grid 网格布局实现左右分屏
+        # ── 2. 日志文本输出区 (左右双分屏展示) ──
         mid_frame = ctk.CTkFrame(self)
         mid_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
@@ -106,7 +105,7 @@ class ErrorLogTab(ctk.CTkFrame):
         # 配置第 1 行 (文本框所在行) 上下撑满
         mid_frame.grid_rowconfigure(1, weight=1)
 
-        # (1) 左侧运行 Terminal 日志框 (黑色底色，翠绿色字体，Consolas 14pt 等宽字体)
+        # (1) 左侧运行 Terminal 日志框 (统一深蓝黑背景，柔和主题绿字符，Consolas 13pt)
         ctk.CTkLabel(
             mid_frame,
             text="[LOG] Execution Log (Terminal)",
@@ -115,14 +114,14 @@ class ErrorLogTab(ctk.CTkFrame):
 
         self.txt_log = ctk.CTkTextbox(
             mid_frame,
-            fg_color="#1E1E1E",       # 深黑终端背景
-            text_color="#00FF00",     # 翠绿黑客风字符
-            font=ctk.CTkFont(family="Consolas", size=14)
+            fg_color="#1E1E2E",       # 统一深蓝黑终端背景
+            text_color="#50FA7B",     # 柔和舒适主题绿
+            font=ctk.CTkFont(family="Consolas", size=13)
         )
         self.txt_log.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self.txt_log.configure(state="disabled") # 设为只读，防止用户误碰键盘敲入杂乱字符
 
-        # (2) 右侧 >10k 记录跳过警报框 (黑色底色，亮红色字体，Consolas 14pt)
+        # (2) 右侧 >10k 记录跳过警报框 (统一深蓝黑背景，醒目警示红字，Consolas 13pt)
         ctk.CTkLabel(
             mid_frame,
             text="[SKIP] Skipped Servers (>10k)",
@@ -132,9 +131,9 @@ class ErrorLogTab(ctk.CTkFrame):
 
         self.txt_skip = ctk.CTkTextbox(
             mid_frame,
-            fg_color="#1E1E1E",       # 深黑背景
+            fg_color="#1E1E2E",       # 统一深蓝黑终端背景
             text_color="#FF4C4C",     # 醒目警示红字
-            font=ctk.CTkFont(family="Consolas", size=14)
+            font=ctk.CTkFont(family="Consolas", size=13)
         )
         self.txt_skip.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="nsew")
         self.txt_skip.configure(state="disabled") # 初始只读
@@ -160,7 +159,7 @@ class ErrorLogTab(ctk.CTkFrame):
                 # 自身正在抓取中
                 self.btn_start.configure(state="disabled")
                 self.btn_stop.configure(state="normal", text="[STOP] Stop")
-            elif is_checkpoint_running:
+            elif is_checkpoint_running or getattr(self.app, "is_logging_in", False) or getattr(self.app, "closing", False):
                 # 巡检正在运行，彻底锁定
                 self.btn_start.configure(state="disabled")
                 self.btn_stop.configure(state="disabled", text="[STOP] Stop")
@@ -169,8 +168,8 @@ class ErrorLogTab(ctk.CTkFrame):
                 self.btn_start.configure(state="normal")
                 self.btn_stop.configure(state="disabled", text="[STOP] Stop")
 
-        # 通过 self.after(0, apply) 确保在 Tkinter 主 UI 线程中安全更新控件属性
-        self.after(0, apply)
+        # 通过 self.app.post_ui(apply) 确保在 Tkinter 主 UI 线程中安全更新控件属性
+        self.app.post_ui(apply)
 
     def _append_text(self, textbox, text: str):
         """
@@ -189,7 +188,7 @@ class ErrorLogTab(ctk.CTkFrame):
             textbox.insert("end", text)
             textbox.see("end")
             textbox.configure(state="disabled")
-        self.after(0, append)
+        self.app.post_ui(append)
 
     def log(self, message: str):
         """
@@ -227,6 +226,9 @@ class ErrorLogTab(ctk.CTkFrame):
         [跨 Tab 状态互斥探针]
         检查 Checkpoint 自动化巡检是否正在运行；若正在运行，打印警告并拦截本次执行。
         """
+        if getattr(self.app, 'closing', False) or getattr(self.app, 'is_logging_in', False):
+            self.log("[WARN] Browser is busy logging in or the application is closing.")
+            return True
         if hasattr(self.app, 'checkpoint_tab') and getattr(self.app.checkpoint_tab, 'is_running', False):
             self.log("[WARN] 🚫 Operation rejected: Checkpoint inspection is currently running! Please wait or stop checkpoint task.")
             return True
@@ -252,6 +254,12 @@ class ErrorLogTab(ctk.CTkFrame):
             self.log("[WARN] Account or password is empty. Please enter valid credentials!")
             return
 
+        try:
+            self.service = ErrorLogScraperService(self.log, self.skip_log, login_url=login_url)
+        except Exception as exc:
+            self.log(f"[ERROR] 无法初始化导出任务: {exc}")
+            return
+
         # 4. 标记当前处于运行状态
         self.is_running = True
 
@@ -262,7 +270,7 @@ class ErrorLogTab(ctk.CTkFrame):
             self.update_button_states()
 
         # 6. 构造后台导出服务实例，传入主日志回调、跳过日志回调及登录 URL
-        self.service = ErrorLogScraperService(self.log, self.skip_log, login_url=login_url)
+
 
         # 7. 启动子线程执行任务，daemon=True 确保主窗口退出时子线程能随之销毁
         threading.Thread(target=self.run_service, args=(user, pwd), daemon=True).start()
@@ -299,4 +307,3 @@ class ErrorLogTab(ctk.CTkFrame):
                 self.app.notify_task_state_changed()
             else:
                 self.update_button_states()
-

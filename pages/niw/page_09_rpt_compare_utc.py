@@ -24,32 +24,14 @@ class RPTCompareUTCChecker(BaseChecker):
     负责全面核对 24 小时时间行 (00~23) 在多个日期与 Satellite 节点下的 UTC Curr, PL, Odd 子列状态。
     """
 
-    def check(self) -> bool:
-        """
-        [关卡主巡检方法]
-        1. 导航进入 RPT Compare UTC 页面 (apy_b0i10text)
-        2. 点击 Search 按钮获取最新数据
-        3. 执行前端 JavaScript 深度抓取 24 小时时间段矩阵
-        4. 打印全量明细日志并进行 Tier 1 报错阻断校验 (任何红底或非 ok 均阻断)
-        5. 存储结果至 CheckpointStore 并点击关卡 Checkpoint 按钮
-        """
-        # 1. 打印第 9 站日志头信息
-        self.log_station_header("第9站 RPT Compare UTC", menu_id="apy_b0i10text")
-        try:
-            # 2. 导航切入 RPT Compare UTC 页面 (Menu ID: apy_b0i10text)
-            self.navigate_to_menu("RPT Compare UTC", menu_id="apy_b0i10text", section="NIW")
+    def _extract_data(self):
+        return self.driver.execute_script(r"""
 
-            # 3. 点击 Search 触发最新查询
-            self.click_search_button()
-
-            # 4. 智能等待页面数据加载完毕 (最多等待 35 秒)
-            self.wait_for_page_loaded(seconds=1.5, max_wait=35)
-            
-            # 5. 执行核心 JavaScript 脚本，深度抓取 24 小时 (00~23) 矩阵表格数据
-            p9_data = self.driver.execute_script("""
                 // 1. 初始化返回给 Python 的数据容器
                 var result = {
                     categoryName: "RCM",   // 当前分类名称 (默认 RCM)
+                    pendingCells: 0,
+                    uniqueHours: [],
                     hoursCount: 0,          // 抓取到的时间段总数 (正常为 24 小时 00~23)
                     totalOkCount: 0,        // 状态为 'ok' 绿底的单元格总数
                     errList: [],            // 异常单元格详细记录列表
@@ -68,7 +50,7 @@ class RPTCompareUTCChecker(BaseChecker):
                 tables.forEach(function(t) {
                     // 过滤掉日历控件的表格 (避免被干扰)
                     if (t.classList.contains("ui-datepicker-calendar") || t.closest(".ui-datepicker") !== null) return;
-                    
+
                     // 获取当前表格的完整纯文本
                     var txt = t.innerText ? t.innerText.trim() : "";
                     // 只有包含 'Hour' 或 'UTC' 关键词的表格才是我们要抓取的主矩阵表格
@@ -78,7 +60,8 @@ class RPTCompareUTCChecker(BaseChecker):
                     var rows = t.querySelectorAll("tr");
                     rows.forEach(function(r) {
                         // 获取当前行的所有单元格 (td 或 th)
-                        var tds = r.querySelectorAll("td, th");
+                        if (r.closest("table") !== t) return;
+                        var tds = Array.from(r.children).filter(c => /^(TD|TH)$/.test(c.tagName));
                         // 矩阵行通常拥有较多列 (至少 5 列以上)
                         if (tds.length >= 5) {
                             var txts = [];
@@ -104,8 +87,11 @@ class RPTCompareUTCChecker(BaseChecker):
                             }
 
                             // 5. 确保提取到有效的小时字段，且类型为有效业务类型
-                            if (hourVal && (typeVal === "sport" || !isNaN(parseInt(hourVal)))) {
+                            if (/^(?:[01]?\d|2[0-3])$/.test(hourVal) && typeVal.toLowerCase() === "sport") {
+                                var hourNumber = parseInt(hourVal, 10);
+                                if (result.uniqueHours.indexOf(hourNumber) === -1) result.uniqueHours.push(hourNumber);
                                 result.hoursCount++;     // 统计有效小时行计数
+                                var rowHasPending = false;
                                 var rowHasErr = false;   // 标记当前行是否存在异常单元格
 
                                 // 6. 遍历当前行的所有数据列单元格
@@ -114,12 +100,20 @@ class RPTCompareUTCChecker(BaseChecker):
                                     // 获取单元格计算后的背景色样式
                                     var bg = window.getComputedStyle(tds[c]).backgroundColor;
                                     // 判定是否为红底 (RGB 中含有 255 且包含 0, 0 即红色预警)
-                                    var isRed = (bg.indexOf("255") !== -1 && bg.indexOf("0, 0") !== -1);
+                                    var rgb = bg.match(/[\d.]+/g) || [];
+                                    var isRed = rgb.length >= 3 && +rgb[0] >= 170 && +rgb[1] <= 110 && +rgb[2] <= 110;
+                                    var loadingImage = Array.from(tds[c].querySelectorAll("img")).some(img => img.getClientRects().length > 0);
+                                    var pending = !isRed && (!cellText || /loading|please wait|加载中/.test(cellText) || loadingImage);
+                                    if (pending) {
+                                        result.pendingCells++;
+                                        rowHasPending = true;
+                                        continue;
+                                    }
 
                                     // 正常情况：文本为 'ok' 且不是红底
                                     if (cellText === "ok" && !isRed) {
                                         result.totalOkCount++;
-                                    } else if (cellText !== "") {
+                                    } else {
                                         // 异常情况：单元格有文本但不是 ok，或者呈现红底
                                         rowHasErr = true;
                                         result.errList.push("Hour " + hourVal + " (列" + c + "): " + cellText);
@@ -132,13 +126,13 @@ class RPTCompareUTCChecker(BaseChecker):
 
                                 var line = "Hour " + hourVal + " (" + typeVal + "): 单元格校验通过 " + statusTag;
                                 result.hourRows.push(line);
-                                
+
                                 // 8. 存入供仪表盘呈现的结构化数据字典
                                 result.rawRows = result.rawRows || [];
                                 result.rawRows.push({
                                     hour: "Hour " + hourVal,
                                     type: typeVal,
-                                    status: rowHasErr ? "ERROR" : "OK",
+                                    status: rowHasErr ? "ERROR" : (rowHasPending ? "LOADING" : "OK"),
                                     is_error: rowHasErr
                                 });
                             }
@@ -148,7 +142,79 @@ class RPTCompareUTCChecker(BaseChecker):
 
                 // 将解析提取的结果对象返回给 Python
                 return result;
-            """)
+
+        """)
+
+    def _wait_for_matrix_loaded(self, timeout=120):
+        import time
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.common.exceptions import TimeoutException
+        previous = None
+        stable_since = None
+        last_notice = time.monotonic()
+        last_state = {}
+        self.log("[LOAD] RPT Compare UTC：等待 00–23 时全部数据，加载图标和空白不算通过。")
+
+        def ready(driver):
+            nonlocal previous, stable_since, last_notice, last_state
+            state = self._extract_data()
+            last_state = state
+            idle = driver.execute_script("return document.readyState === 'complete' && (typeof jQuery === 'undefined' || jQuery.active === 0);")
+            now = time.monotonic()
+            complete = len(set(state.get('uniqueHours', []))) == 24 and state.get('pendingCells', 0) == 0 and state.get('hoursCount', 0) >= 24
+            if now - last_notice >= 15:
+                self.log(f"[LOAD] UTC：已找到 {len(set(state.get('uniqueHours', [])))}/24 小时，仍有 {state.get('pendingCells', 0)} 格加载中。")
+                last_notice = now
+            if not idle or not complete:
+                previous, stable_since = None, None
+                return False
+            signature = repr(state)
+            if previous != signature or stable_since is None:
+                previous, stable_since = signature, now
+                return False
+            return state if now - stable_since >= 1.0 else False
+
+        try:
+            return WebDriverWait(self.driver, timeout, poll_frequency=0.5).until(ready)
+        except TimeoutException as exc:
+            hours = len(set(last_state.get('uniqueHours', [])))
+            pending = last_state.get('pendingCells', 0)
+            raise RuntimeError(f"UTC 数据加载超时（{timeout}秒）：{hours}/24 小时，{pending} 格仍加载中；尚未检查数据或点击 Checkpoint，请 Resume 重试。") from exc
+
+    def check(self) -> bool:
+        """
+        [关卡主巡检方法]
+        1. 导航进入 RPT Compare UTC 页面 (apy_b0i10text)
+        2. 点击 Search 按钮获取最新数据
+        3. 执行前端 JavaScript 深度抓取 24 小时时间段矩阵
+        4. 打印全量明细日志并进行 Tier 1 报错阻断校验 (任何红底或非 ok 均阻断)
+        5. 存储结果至 CheckpointStore 并点击关卡 Checkpoint 按钮
+        """
+        # 1. 打印第 9 站日志头信息
+        self.log_station_header("第9站 RPT Compare UTC", menu_id="apy_b0i10text")
+        try:
+            # 2. 导航切入 RPT Compare UTC 页面 (Menu ID: apy_b0i10text)
+            self.navigate_to_menu("RPT Compare UTC", menu_id="apy_b0i10text", section="NIW")
+
+            # 3. 点击 Search 触发最新查询
+            if not self.click_search_button():
+                raise RuntimeError("RPT Compare UTC：找不到 Search 按钮，未开始查询")
+
+            # Loading icons/blank cells are pending data, never evidence of OK.
+            try:
+                p9_data = self._wait_for_matrix_loaded(timeout=120)
+            except RuntimeError as exc:
+                if "UTC 数据加载超时" not in str(exc):
+                    raise
+                self.log("[WARN] UTC 加载超过 120 秒，重新点击一次 Search 后再等待 120 秒。")
+                if not self.click_search_button():
+                    raise RuntimeError("UTC 加载超时后无法重新点击 Search，巡检暂停。") from exc
+                try:
+                    p9_data = self._wait_for_matrix_loaded(timeout=120)
+                except RuntimeError as retry_exc:
+                    if "UTC 数据加载超时" not in str(retry_exc):
+                        raise
+                    raise RuntimeError("UTC 首次等待 120 秒并重新 Search 一次后，再等 120 秒仍未加载完成，巡检暂停；请检查系统后 Resume 重试。") from retry_exc
 
             # 6. 从前端返回的字典中解析各项指标
             cat_name = p9_data.get("categoryName", "RCM")
@@ -183,6 +249,7 @@ class RPTCompareUTCChecker(BaseChecker):
                 # 存在异常单元格，判定失败，阻断当前关卡
                 self.log_check_result(False, f"RPT Compare UTC 巡检发现 {len(err_list)} 处非 ok/红底异常单元格，强阻断 Checkpoint！")
                 CheckpointStore.save(
+                    derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                     page_key="niw_09",
                     title="RPT Compare UTC",
                     status=False,
@@ -196,10 +263,12 @@ class RPTCompareUTCChecker(BaseChecker):
                 self.log_check_result(True, f"RPT Compare UTC 全部 24 个时间段 (00~23) 跨度下所有子列均显示 'ok' 绿底，巡检合格！")
 
             # 11. 解封并点击页面底部的 Checkpoint 按钮
-            self.click_checkpoint()
-            
+            if not self.click_checkpoint():
+                raise RuntimeError("Checkpoint button could not be submitted; retry this station")
+
             # 12. 保存成功记录至 CheckpointStore
             CheckpointStore.save(
+                derived_status_columns=tuple(i for i, h in enumerate(table_headers) if h == "Status"),
                 page_key="niw_09",
                 title="RPT Compare UTC",
                 status=True,

@@ -13,35 +13,6 @@ class BaseChecker:
     1. 统一管理与 Chrome 浏览器的底层交互（如框架 Frame 切换、菜单点击、Search 搜索）。
     2. 提供【全页 RGB 真实计算颜色扫描器】(scan_red_cells)，精准捕获所有红字/红背景。
     3. 提供透明化的【日志打印助手】(log_station_header, log_data_extracted 等)，向界面输出清晰解说。
-    ================================================================================
-    """
-
-    # 常用前端 JavaScript 辅助计算库（供子类 execute_script 组合使用）
-    JS_COMMON_UTILS = """
-    function isRed(colorStr) {
-        if (!colorStr) return false;
-        var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-        if (m) {
-            var r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
-            return (r >= 170 && g <= 110 && b <= 110);
-        }
-        return false;
-    }
-    function isGreen(colorStr) {
-        if (!colorStr) return false;
-        var m = colorStr.match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/);
-        if (m) {
-            var r = parseInt(m[1]), g = parseInt(m[2]), b = parseInt(m[3]);
-            return (g >= 140 && r <= 100 && b <= 100);
-        }
-        return false;
-    }
-    function cleanNum(txt) {
-        if (!txt) return 0;
-        var cleaned = txt.toString().replace(/,/g, '').trim();
-        var n = parseFloat(cleaned);
-        return isNaN(n) ? 0 : n;
-    }
     """
 
     def __init__(self, driver, logger_func=None):
@@ -74,13 +45,6 @@ class BaseChecker:
     # --------------------------------------------------------------------------------
     def log_station_header(self, station_name: str, menu_id: str = None, page_key: str = None):
         """打印关卡标题分隔线，并复位日志缓冲与表格数据"""
-        self._current_station_name = station_name
-        self._current_station_id = menu_id if menu_id else station_name.replace(" ", "_")
-        self._current_page_key = page_key
-        self._current_log_buffer = []
-        self._current_table_headers = None
-        self._current_table_rows = None
-
         self.log("\n================================================================================")
         self.log(f"[STATION] 开始巡检: {station_name} (Target Menu ID: {menu_id if menu_id else 'Direct Nav'})")
         self.log("================================================================================")
@@ -114,7 +78,7 @@ class BaseChecker:
 
         # 1. 初始化计算每一列的最小宽度 (先取表头文本长度)
         col_widths = [len(str(h)) for h in headers]
-        
+
         # 2. 遍历所有数据行，动态扩展列宽为行内最长文本长度
         for row in rows:
             for i, cell in enumerate(row):
@@ -137,24 +101,21 @@ class BaseChecker:
             make_row(headers, col_widths),           # 表头文本行
             make_line(col_widths),                  # 表头与数据分割线
         ]
-        
+
         # 填充所有数据行
         for row in rows:
             # 补齐不足的列数为纯空字符串
             padded = list(row) + [""] * (len(headers) - len(row))
             lines.append(make_row(padded, col_widths))
-        
+
         # 追加底边框
         lines.append(make_line(col_widths, "└", "┴", "┘"))
-        
+
         # 使用换行符连接为完整文本返回
         return "\n".join(lines)
 
     def log_table_data(self, headers: list, rows: list):
         """保存并格式化打印结构化表格数据（供桌面 .txt 和 HTML 仪表盘渲染）"""
-        self._current_table_headers = headers
-        self._current_table_rows = rows
-        
         try:
             ascii_table = self.format_ascii_table(headers, rows)
             self.log("[TABLE DATA] 提取表格数据明细:")
@@ -165,7 +126,6 @@ class BaseChecker:
 
     def log_data_summary(self, details: list):
         """打印结构化明细列表"""
-        self._current_summary_details = details
         self.log("[DATA SUMMARY] 抓取到具体数据明细如下:")
         for line in details:
             self.log(f"   -> {line}")
@@ -188,7 +148,8 @@ class BaseChecker:
         self.navigate_to_menu(title, menu_id=menu_id, section=section, wait_seconds=wait_sec)
 
     def _save_checkpoint_result(self, page_key: str, title: str, status: bool, summary_msg: str,
-                                headers: list = None, rows: list = None, tables: list = None) -> bool:
+                                headers: list = None, rows: list = None, tables: list = None,
+                                has_warn: bool = None) -> bool:
         """内部公共提交结果方法，消除 finish_success 与 finish_failed 的保存重复代码"""
         self.log_check_result(status, summary_msg)
         CheckpointStore.save(
@@ -198,18 +159,19 @@ class BaseChecker:
             headers=headers,
             rows=rows,
             tables=tables,
-            summary=summary_msg
+            summary=summary_msg,
+            has_warn=has_warn
         )
         return status
 
     def finish_success(self, page_key: str, title: str, summary_msg: str,
                        headers: list = None, rows: list = None, tables: list = None,
-                       click_cp: bool = True) -> bool:
+                       click_cp: bool = True, has_warn: bool = None) -> bool:
         """[通用通关] 打印成功日志、保存 CheckpointStore 并点击 Check Point 按钮"""
-        self._save_checkpoint_result(page_key, title, True, summary_msg, headers, rows, tables)
         if click_cp:
-            self.click_checkpoint()
-        return True
+            if not self.click_checkpoint():
+                return self.finish_failed(page_key, title, "Checkpoint submission failed", headers, rows, tables)
+        return self._save_checkpoint_result(page_key, title, True, summary_msg, headers, rows, tables, has_warn=has_warn)
 
     def finish_failed(self, page_key: str, title: str, summary_msg: str,
                       headers: list = None, rows: list = None, tables: list = None) -> bool:
@@ -258,7 +220,7 @@ class BaseChecker:
         核心原理:
         1. 动画与遮罩检测: 实时监测页面上是否存在可见的 Loading 动画 / Spinner / Mask / Loading 提示文本。
         2. AJAX 异步完成检测: 监测 document.readyState === 'complete' 以及 jQuery.active === 0。
-        3. 动态智能轮询: 
+        3. 动态智能轮询:
            - 如果数据 1-2 秒内加载完且动画消失，立刻继续，不浪费一秒钟；
            - 如果数据仍在加载 (Loading 动画还亮着)，系统自动等待，直到动画彻底消失；
            - 最多智能轮询 max_wait 秒 (默认 30s)，防止因网络死锁卡死。
@@ -266,7 +228,7 @@ class BaseChecker:
         start_time = time.time()
         poll_interval = 0.5
         min_seconds = max(1.0, float(seconds) if seconds else 2.0)
-        
+
         # 初始微缓冲，让浏览器有时间发起请求并挂起加载动画
         time.sleep(0.6)
 
@@ -354,7 +316,7 @@ class BaseChecker:
         for attempt in range(retry_count + 1):
             try:
                 self.switch_to_menu_frame()
-                
+
                 # 激活顶层 Tab 选项卡 (NIW 或 Copier & Server)
                 try:
                     if section == "NIW":
@@ -379,7 +341,7 @@ class BaseChecker:
                             menu_link = elems[0]
                     except Exception:
                         pass
-                
+
                 if not menu_link:
                     try:
                         elems = self.driver.find_elements(By.XPATH, f"//a[contains(text(), '{menu_title}')]")
@@ -392,11 +354,11 @@ class BaseChecker:
                     menu_link = WebDriverWait(self.driver, 5).until(
                         EC.presence_of_element_located((By.XPATH, f"//a[contains(text(), '{menu_title}')] | //td[contains(@id, 'text')]//a[contains(text(), '{menu_title}')]"))
                     )
-                
+
                 # 通过 JavaScript 触发点击，避免被页面遮挡拦截
                 self.driver.execute_script("arguments[0].click();", menu_link)
                 self.log(f"[NAVIGATE] 已成功进入 {menu_title} 页面 (Menu ID: {menu_id if menu_id else 'Text Match'})")
-                
+
                 # 自动切换到主页面框架并智能等待
                 self.switch_to_main_frame()
                 self.wait_for_page_loaded(seconds=wait_seconds)
@@ -474,6 +436,23 @@ class BaseChecker:
             self.log(f"[WARN] 点击 Search 按钮提示: {e}")
         return False
 
+    def _checkpoint_done(self):
+        """Recognize the site's Done feedback only within a Checkpoint panel."""
+        return self.driver.execute_script(r"""
+            var panels = Array.from(document.querySelectorAll('#div_checkpoint, [id*="checkpoint" i]'));
+            var button = document.getElementById('checkpoint');
+            if (button && button.parentElement) panels.push(button.parentElement);
+            function visible(el) {
+                return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+            }
+            return panels.some(function(panel) {
+                return [panel].concat(Array.from(panel.querySelectorAll('input,button,a,span,td,div,font,b,strong'))).some(function(el) {
+                    var text = (el.value || el.innerText || el.textContent || '').trim();
+                    return visible(el) && /^done[.!]?$/i.test(text);
+                });
+            });
+        """) is True
+
     def click_checkpoint(self) -> bool:
         """
         [Check Point 点击函数]
@@ -482,17 +461,78 @@ class BaseChecker:
         try:
             # 确保 checkpoint 区域在页面上显示出来
             self.driver.execute_script("if(typeof jQuery !== 'undefined') { $('#div_checkpoint').show(); }")
-            checkpoint_btn = WebDriverWait(self.driver, 5).until(
-                EC.presence_of_element_located((By.ID, "checkpoint"))
-            )
+            def locate(driver):
+                if self._checkpoint_done():
+                    return (True, None)
+                buttons = driver.find_elements(By.ID, "checkpoint")
+                return (False, buttons[0]) if buttons else False
+
+            already_done, checkpoint_btn = WebDriverWait(self.driver, 5).until(locate)
+            if already_done:
+                self.log("[CHECKPOINT] SUCCESS: 页面已显示 Done，继续下一关。")
+                return True
             self.log("[CHECKPOINT] 找到 Check Point 按钮 (ID: checkpoint)，准备点击...")
-            time.sleep(1)
-            self.driver.execute_script("arguments[0].click();", checkpoint_btn)
-            self.log("[CHECKPOINT] SUCCESS: 已成功点击 Check Point 按钮！")
-            time.sleep(3)
+            if checkpoint_btn.get_attribute("type") in ("checkbox", "radio") and checkpoint_btn.is_selected():
+                return True
+            self.driver.execute_script("""
+                var b = arguments[0];
+                var tracker = window.__checkpointSubmission = {
+                    pending: 0, completed: 0, failed: false,
+                    before: [b.disabled, b.value, b.textContent, b.className].join('|')
+                };
+                var originalSend = XMLHttpRequest.prototype.send;
+                var originalFetch = window.fetch;
+                XMLHttpRequest.prototype.send = function() {
+                    tracker.pending++;
+                    this.addEventListener('loadend', function() {
+                        tracker.pending--; tracker.completed++;
+                        if (this.status < 200 || this.status >= 400) tracker.failed = true;
+                    }, {once: true});
+                    return originalSend.apply(this, arguments);
+                };
+                if (originalFetch) window.fetch = function() {
+                    tracker.pending++;
+                    return originalFetch.apply(this, arguments).then(function(response) {
+                        tracker.pending--; tracker.completed++;
+                        if (!response.ok) tracker.failed = true;
+                        return response;
+                    }, function(error) {
+                        tracker.pending--; tracker.failed = true;
+                        throw error;
+                    });
+                };
+                try { b.click(); }
+                finally {
+                    XMLHttpRequest.prototype.send = originalSend;
+                    if (originalFetch) window.fetch = originalFetch;
+                }
+            """, checkpoint_btn)
+            WebDriverWait(self.driver, 15).until(lambda d: self._checkpoint_done() or d.execute_script("""
+                var b = document.getElementById('checkpoint');
+                var t = window.__checkpointSubmission;
+                var ready = document.readyState === 'complete' &&
+                    (typeof jQuery === 'undefined' || jQuery.active === 0);
+                if (!ready) return false;
+                // A new document means navigation has completed.
+                if (!t) return true;
+                if (t.failed) throw new Error('Checkpoint request failed');
+                if (t.pending) return false;
+                if (t.completed > 0) return true;
+                if (!b) return true;
+                if (b.type === 'checkbox' || b.type === 'radio') return b.checked;
+                return [b.disabled, b.value, b.textContent, b.className].join('|') !== t.before;
+            """))
+            self.log("[CHECKPOINT] SUCCESS: Check Point 点击完成，页面请求已就绪。")
             return True
         except Exception as e:
-            self.log(f"[WARN] 没有找到 id 为 checkpoint 的按钮，或不可点击: {e}")
+            try:
+                done = self._checkpoint_done()
+            except Exception:
+                done = False
+            if done:
+                self.log("[CHECKPOINT] SUCCESS: 页面已显示 Done，继续下一关。")
+                return True
+            self.log(f"[WARN] Checkpoint 未确认完成（按钮不可用或提交超时）：{type(e).__name__}: {str(e).strip() or '未收到完成反馈'}")
             return False
 
     def scan_red_cells(self) -> list:
@@ -503,13 +543,13 @@ class BaseChecker:
         原理:
         1. 直接在浏览器 JavaScript 内存中遍历页面所有单元格 (td, span, div, font 等)。
         2. 调用浏览器原生 `window.getComputedStyle(el)` 读取元素渲染在屏幕上的最终 RGB 颜色。
-        3. 提取 R, G, B 三原色分量：只要满足 (R >= 170 且 G <= 110 且 B <= 110)，不论网页是用 CSS Class, 
+        3. 提取 R, G, B 三原色分量：只要满足 (R >= 170 且 G <= 110 且 B <= 110)，不论网页是用 CSS Class,
            bgcolor="red", style="color:red", 还是第三方框架渲染的，都能 100% 判为红字/红背景！
         4. 自动智能过滤 <th> 表头和 Remarks 使用指南框中的提示段落。
         ================================================================================
         """
         self.log("[SCAN] 正在通过 DOM RGB 计算样式深度扫描全页红字、红背景及异常节点...")
-        
+
         red_items = self.driver.execute_script("""
             var elements = document.querySelectorAll("td, div, span, font, a");
             var results = [];
@@ -536,7 +576,7 @@ class BaseChecker:
                 var lowerTxt = txt.toLowerCase();
 
                 // 过滤 Remarks 静态使用指南与说明短语
-                if (lowerTxt.includes("remarks") || lowerTxt.includes("if show error") || 
+                if (lowerTxt.includes("remarks") || lowerTxt.includes("if show error") ||
                     lowerTxt.includes("this tool") || lowerTxt.includes("click patch") ||
                     lowerTxt.includes("robot recalculate") || lowerTxt.includes("click complete")) {
                     continue;

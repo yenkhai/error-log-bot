@@ -7,23 +7,10 @@ echo          开始打包 Work App (work.exe)...
 echo ==================================================
 echo.
 
-:: 1. 清理旧的编译缓存
-if exist build (
-    echo [1/3] 正在清理旧的 build 缓存文件夹...
-    rmdir /s /q build
-)
-if exist "work.spec" (
-    echo [1/3] 正在清理旧的 work.spec 配置文件...
-    del "work.spec"
-)
-
-:: 2. 执行打包命令 (打包统一入口 main.py -> work.exe)
-echo.
-echo [2/3] 正在调用 PyInstaller 进行打包 (main.py -> work.exe)...
-echo       (正在封装 CustomTkinter、Selenium、模块化巡检与导出工具，请稍候...)
-echo.
-
-py -m PyInstaller --onefile --noconsole --collect-all customtkinter --collect-all selenium --icon="logo.ico" --name="work" main.py
+:: Always build relative to this script, so resource paths do not depend on the current working directory.
+cd /d "%~dp0"
+echo [1/2] Building work.exe...
+py -m PyInstaller --noconfirm --onefile --noconsole --collect-all customtkinter --collect-all selenium --icon="logo.ico" --name="work" main.py
 
 :: 3. 检查结果
 echo.
